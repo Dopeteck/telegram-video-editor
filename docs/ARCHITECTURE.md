@@ -13,20 +13,23 @@ Download one exact R2 object key
         +--> Faster-Whisper transcript with timestamps
         |
         +--> Read B-roll catalogue (metadata only)
+        |
+        +--> Local Ollama editorial plan (runs even without B-roll)
                     |
                     v
-              Local Ollama edit planner
+       Validate B-roll, punch-ins, and transcript-exact callouts
                     |
-                    v
-          Validate cues against the catalogue
-                    |
-                    v
-        Download only selected, rights-cleared assets
-                    |
-                    v
-           FFmpeg render + original audio
-                    |
-                    v
+          +---------+----------------------+
+          |                                |
+          v                                v
+ Download selected, cleared assets   OCR source for burned-in captions
+          |                                |
+          +---------------+----------------+
+                          |
+                          v
+           FFmpeg visual edit + loudness pass
+                          |
+                          v
        Upload to edited/<run_id>/ + plan manifest
 ```
 
@@ -37,9 +40,12 @@ Download one exact R2 object key
 - B-roll must come from the user's own/cleared R2 library. No automatic stock-site scraping.
 - An asset is eligible only when its catalogue row has a source URL, licence note, and `rights_verified: true`.
 - AI-generated asset IDs not present in the catalogue are rejected. Invalid, out-of-range, overlapping cues are rejected.
-- B-roll audio is never mixed into the output. The original clip's audio remains the audio track.
+- Punch-ins are restricted to modest zoom values and bounded durations. Callouts must be exact contiguous phrases from the transcript and their on-screen time must overlap the matching spoken words.
+- The default caption policy uses OCR to detect existing burned-in text. A negative detection is only trusted after enough frames are successfully sampled; if OCR is unavailable or uncertain, the source is preserved rather than risking duplicate captions.
+- New captions use Faster-Whisper word timestamps in short karaoke-style beats with active-word highlighting, and are rendered only when the caption policy allows them.
+- B-roll audio is never mixed into the output. Dialogue stays on the original audio stream and receives loudness normalisation.
 - The model produces a plan; deterministic validation and FFmpeg perform the render.
 
 ## Render policy
 
-The editor preserves the source clip's frame dimensions and audio. B-roll is fitted to the frame as a cutaway. Styled captions are generated from the fresh transcript. If there is no relevant cleared footage, the output uses captions without unrelated filler footage.
+The editor preserves the source clip's frame dimensions and dialogue. B-roll is fitted to the frame as a cutaway; modest punch-ins and exact-transcript callouts can still be applied when the B-roll library is empty. New captions are generated only when the selected caption policy allows them and the default OCR check does not find existing burned-in text. If there is no relevant cleared footage, the planner must not insert unrelated filler footage.

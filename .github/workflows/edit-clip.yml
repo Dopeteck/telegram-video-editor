@@ -21,6 +21,15 @@ on:
           - base
           - small
           - medium
+      caption_mode:
+        description: "Auto-detect existing burned-in captions; preserve or force new captions"
+        required: true
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - preserve
+          - force
 
 permissions:
   contents: read
@@ -68,7 +77,7 @@ jobs:
       - name: Install FFmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-liberation
+          sudo apt-get install -y ffmpeg fonts-liberation tesseract-ocr
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -103,7 +112,7 @@ jobs:
               code = str(((error.get('Error') or {}).get('Code')) or '')
               if code in {'NoSuchKey', '404', 'NotFound'}:
                   payload = {'assets': []}
-                  print(f'No B-roll catalogue at {key}; caption-only edit will be used.')
+                  print(f'No B-roll catalogue at {key}; AI punch-ins and transcript-grounded callouts will still be planned.')
               else:
                   raise
 
@@ -114,8 +123,7 @@ jobs:
           print(f'Rights-cleared B-roll assets available: {len(assets)}')
           PY
 
-      - name: Install and start Ollama
-        if: steps.broll.outputs.available == 'true'
+      - name: Install and start Ollama editorial planner
         shell: bash
         run: |
           set -euo pipefail
@@ -146,6 +154,7 @@ jobs:
           CLIP_KEY: ${{ inputs.clip_key }}
           CATALOG_KEY: ${{ inputs.catalog_key }}
           WHISPER_MODEL: ${{ inputs.whisper_model }}
+          CAPTION_MODE: ${{ inputs.caption_mode }}
           JOB_ID: ${{ github.run_id }}
         run: |
           python -m video_editor process-r2 \
@@ -153,6 +162,7 @@ jobs:
             --job-id "$JOB_ID" \
             --catalog-key "$CATALOG_KEY" \
             --whisper-model "$WHISPER_MODEL" \
+            --caption-mode "$CAPTION_MODE" \
             --model "$AI_MODEL" \
             --ollama-url "$OLLAMA_HOST"
 

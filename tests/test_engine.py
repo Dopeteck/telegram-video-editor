@@ -66,14 +66,40 @@ def test_missing_broll_catalogue_falls_back_to_caption_only():
     assert load_broll_catalog(MissingObject(), "bucket", "broll/catalog.json") == []
 
 
-def test_empty_broll_library_skips_ollama_planning(monkeypatch):
+def test_empty_broll_library_still_gets_an_ai_editorial_plan(monkeypatch):
+    import json
     import video_editor.engine as engine
 
-    def unexpected_call(*args, **kwargs):
-        raise AssertionError("Ollama should not be called without B-roll assets")
+    transcript = [
+        engine.TranscriptSegment(0.0, 3.0, "This is a sample sentence."),
+        engine.TranscriptSegment(3.0, 7.0, "The market cap is like $1.6 trillion."),
+    ]
+    payload = {
+        "title": "A trillion-dollar market",
+        "broll_cues": [],
+        "punch_ins": [{"start": 3.0, "end": 7.0, "zoom": 1.10, "reason": "Emphasise the number"}],
+        "callouts": [{"start": 3.0, "end": 6.0, "text": "$1.6 trillion", "reason": "Key market figure"}],
+    }
 
-    monkeypatch.setattr(engine.urllib.request, "urlopen", unexpected_call)
-    transcript = [engine.TranscriptSegment(0.0, 3.0, "This is a sample sentence.")]
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps({"message": {"content": json.dumps(payload)}}).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        request_body = json.loads(request.data.decode("utf-8"))
+        assert request_body["messages"][0]["role"] == "system"
+        assert json.loads(request_body["messages"][1]["content"])["available_rights_cleared_broll"] == []
+        return FakeResponse()
+
+    monkeypatch.setattr(engine.urllib.request, "urlopen", fake_urlopen)
     plan = engine.create_edit_plan(transcript, 10.0, [])
-    assert plan.title == "Edited clip"
+    assert plan.title == "A trillion-dollar market"
     assert plan.broll_cues == ()
+    assert len(plan.punch_ins) == 1
+    assert plan.callouts[0].text == "$1.6 trillion"

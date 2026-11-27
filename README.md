@@ -9,13 +9,14 @@ A **separate post-processing system** for finished clips produced by Chopify. It
 - Manual GitHub Actions trigger; no automatic coupling to the clipper.
 - Reads a completed clip from the existing private R2 bucket.
 - Transcribes the short clip locally with Faster-Whisper (no paid transcription API).
-- Uses local Ollama model `qwen3:4b-instruct-2507-q4_K_M` to propose an edit plan when cleared B-roll exists.
+- Uses local Ollama model `qwen3:4b-instruct-2507-q4_K_M` to plan edits even when the B-roll library is empty.
 - Selects B-roll **only** from an asset catalogue whose entries record a source, licence, and `rights_verified: true`.
-- Uses FFmpeg to insert relevant full-frame B-roll cutaways while preserving the clip's original dialogue/audio.
-- Burns in clean captions and uploads a separate MP4 plus an edit-plan JSON manifest.
+- Adds restrained, timed speaker punch-ins and designed callout graphics. Callout text must be an exact phrase from the transcript.
+- Detects likely burned-in subtitles with Tesseract OCR. In `auto` mode it preserves existing captions and adds new ones only when no existing text is detected; uncertain OCR fails safe and preserves the source.
+- When captions are needed, uses Faster-Whisper word timestamps to render short karaoke-style caption beats with an active-word highlight and safe frame margins. It also normalises dialogue loudness and uploads a separate MP4 plus an edit-plan JSON manifest.
 - Delivers the edited result into Telegram automatically when Telegram secrets are configured.
 
-If the B-roll catalogue is missing or empty, the editor still produces a captioned edit with the original audio and skips the Ollama model download. It will not download random footage from the internet or invent asset URLs.
+If the B-roll catalogue is missing or empty, the local AI planner still chooses useful punch-ins and transcript-grounded callouts. It does not invent footage or download random stock video. In the manual workflow, `caption_mode` defaults to `auto`; `preserve` never adds subtitles, and `force` is only for a source known to have no burned-in captions.
 
 ## Workflow
 
@@ -23,8 +24,10 @@ If the B-roll catalogue is missing or empty, the editor still produces a caption
 2. Open **Actions → Edit finished clip → Run workflow** in this repository.
 3. Enter the exact R2 object key in `clip_key`.
 4. The editor transcribes, plans, renders, and writes a new result to `edited/<workflow_run_id>/`.
-5. If Telegram secrets are configured, the editor sends the MP4 to your Telegram chat. Files within 49 MB are sent as native Telegram videos. Larger files arrive as a private download button with a 24-hour signed R2 URL.
-6. The original clip remains unchanged.
+5. The local AI planner proposes contextual B-roll, emphasis punch-ins, and exact-phrase callouts; deterministic validation rejects unsafe timestamps, invented B-roll IDs, callout text absent from the transcript, and callouts timed over the wrong spoken phrase.
+6. The renderer checks for source subtitles before adding any new captions, applies the selected visual edits, and normalises dialogue loudness.
+7. If Telegram secrets are configured, the editor sends the MP4 to your Telegram chat. Files within 49 MB are sent as native Telegram videos. Larger files arrive as a private download button with a 24-hour signed R2 URL.
+8. The original clip remains unchanged.
 
 ## Repository secrets
 
@@ -61,12 +64,12 @@ pytest
 
 The R2 workflow is manual-only. No clip-processing run is started by a push or pull request.
 
-## Roadmap
+## Quality roadmap
 
-1. Foundation: safe R2 input/output, local transcription, strict edit-plan validation, B-roll cutaways, captions, tests.
-2. Visual polish: animated word emphasis, controlled punch-ins, smoother transitions, optional licensed sound effects/music.
-3. Curated B-roll library with usage-rights records.
+1. **Current branch work:** AI planning without requiring B-roll, controlled emphasis zooms, transcript-grounded callout graphics, subtitle detection/preservation, safe caption wrapping, and dialogue loudness normalisation.
+2. **Next visual pass:** face-aware portrait reframing, scene-aware cut timing, smoother transitions, and a preview/approval step.
+3. Curated rights-cleared B-roll and optional licensed sound effects/music.
 4. Review UX: compare original and edited versions, approve/reject before publishing.
-5. Optional automation only after quality is proven; the clipper stays unchanged.
+5. Optional automation only after repeatable quality reviews; the clipper stays unchanged.
 
 Editing can improve clarity, retention, and originality, but cannot guarantee recommendation reach or monetization. The source clip and every added asset still need appropriate rights and meaningful editorial value.
