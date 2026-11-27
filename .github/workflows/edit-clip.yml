@@ -110,7 +110,7 @@ jobs:
           assets = parse_catalog(payload)
           available = bool(assets)
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
-              output.write("available={}\\n".format("true" if available else "false"))
+              output.write("available={}{}".format("true" if available else "false", chr(10)))
           print(f'Rights-cleared B-roll assets available: {len(assets)}')
           PY
 
