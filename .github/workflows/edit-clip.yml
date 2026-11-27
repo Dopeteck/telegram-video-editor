@@ -75,7 +75,77 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
+      - name: Check for rights-cleared B-roll assets
+        id: broll
+        env:
+          CATALOG_KEY: ${{ inputs.catalog_key }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from video_editor.engine import create_r2_client, parse_catalog
+
+          client = create_r2_client()
+          bucket = os.environ['R2_BUCKET']
+          key = os.environ['CATALOG_KEY']
+          try:
+              response = client.get_object(Bucket=bucket, Key=key)
+              payload = json.loads(response['Body'].read().decode('utf-8'))
+          except Exception as exc:
+              error = getattr(exc, 'response', {}) or {}
+              code = str(((error.get('Error') or {}).get('Code')) or '')
+              if code in {'NoSuchKey', '404', 'NotFound'}:
+                  payload = {'assets': []}
+                  print(f'No B-roll catalogue at {key}; caption-only edit will be used.')
+              else:
+                  raise
+
+          assets = parse_catalog(payload)
+          available = bool(assets)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"available={'true' if available else 'false'}\\n")
+          print(f'Rights-cleared B-roll assets available: {len(assets)}')
+          PY
+
       - name: Install and start Ollama
+        if: steps.broll.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://ollama.com/install.sh | sh
+          if ! curl -fsS "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
+            nohup ollama serve >/tmp/editor-ollama.log 2>&1 &
+          fi
+          ready=0
+          for attempt in $(seq 1 45); do
+            if curl -fsS "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::Ollama did not start."
+            tail -n 80 /tmp/editor-ollama.log 2>/dev/null || true
+            exit 1
+          fi
+          ollama pull "$AI_MODEL"
+          ollama show "$AI_MODEL" >/dev/null
+
+      - name: Edit the completed clip
+        env:
+          CLIP_KEY: ${{ inputs.clip_key }}
+          CATALOG_KEY: ${{ inputs.catalog_key }}
+          WHISPER_MODEL: ${{ inputs.whisper_model }}
+          JOB_ID: ${{ github.run_id }}
+        run: |
+          python -m video_editor process-r2 \
+            --clip-key "$CLIP_KEY" \
+            --job-id "$JOB_ID" \
+            --catalog-key "$CATALOG_KEY" \
+            --whisper-model "$WHISPER_MODEL" \
+            --model "$AI_MODEL" \
+            --ollama-url "$OLLAMA_HOST"
         shell: bash
         run: |
           set -euo pipefail
