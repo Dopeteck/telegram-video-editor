@@ -1,0 +1,168 @@
+name: Edit finished clip
+
+on:
+  workflow_dispatch:
+    inputs:
+      clip_key:
+        description: "Exact MP4 object key in R2 (jobs/<job_id>/<clip>.mp4)"
+        required: true
+        type: string
+      catalog_key:
+        description: "R2 key for the rights-cleared B-roll catalogue"
+        required: true
+        default: "broll/catalog.json"
+        type: string
+      whisper_model:
+        description: "Local Faster-Whisper model for this short clip"
+        required: true
+        default: "small"
+        type: choice
+        options:
+          - base
+          - small
+          - medium
+
+permissions:
+  contents: read
+
+jobs:
+  edit:
+    name: AI post-process one completed clip
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: telegram-video-clipper-uploads
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      AI_MODEL: qwen3:4b-instruct-2507-q4_K_M
+      OLLAMA_HOST: http://127.0.0.1:11434
+    steps:
+      - name: Validate input and R2 secrets
+        shell: bash
+        env:
+          CLIP_KEY: ${{ inputs.clip_key }}
+          CATALOG_KEY: ${{ inputs.catalog_key }}
+        run: |
+          set -euo pipefail
+          for name in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing repository secret: $name"
+              exit 1
+            fi
+          done
+          if [[ "$CLIP_KEY" != jobs/* || "$CLIP_KEY" == /* || "$CLIP_KEY" == *../* || "$CLIP_KEY" != *.mp4 ]]; then
+            echo "::error::Input must be an original MP4 object key inside jobs/."
+            exit 1
+          fi
+          if [[ "$CATALOG_KEY" != broll/* || "$CATALOG_KEY" == *../* ]]; then
+            echo "::error::B-roll catalogue must be an object key inside broll/."
+            exit 1
+          fi
+
+      - name: Checkout editor
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-liberation
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Check for rights-cleared B-roll assets
+        id: broll
+        env:
+          CATALOG_KEY: ${{ inputs.catalog_key }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from video_editor.engine import create_r2_client, parse_catalog
+
+          client = create_r2_client()
+          bucket = os.environ['R2_BUCKET']
+          key = os.environ['CATALOG_KEY']
+          try:
+              response = client.get_object(Bucket=bucket, Key=key)
+              payload = json.loads(response['Body'].read().decode('utf-8'))
+          except Exception as exc:
+              error = getattr(exc, 'response', {}) or {}
+              code = str(((error.get('Error') or {}).get('Code')) or '')
+              if code in {'NoSuchKey', '404', 'NotFound'}:
+                  payload = {'assets': []}
+                  print(f'No B-roll catalogue at {key}; caption-only edit will be used.')
+              else:
+                  raise
+
+          assets = parse_catalog(payload)
+          available = bool(assets)
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write("available={}\\n".format("true" if available else "false"))
+          print(f'Rights-cleared B-roll assets available: {len(assets)}')
+          PY
+
+      - name: Install and start Ollama
+        if: steps.broll.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://ollama.com/install.sh | sh
+          if ! curl -fsS "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
+            nohup ollama serve >/tmp/editor-ollama.log 2>&1 &
+          fi
+          ready=0
+          for attempt in $(seq 1 45); do
+            if curl -fsS "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::Ollama did not start."
+            tail -n 80 /tmp/editor-ollama.log 2>/dev/null || true
+            exit 1
+          fi
+          ollama pull "$AI_MODEL"
+          ollama show "$AI_MODEL" >/dev/null
+
+      - name: Edit the completed clip
+        id: edit
+        shell: bash
+        env:
+          CLIP_KEY: ${{ inputs.clip_key }}
+          CATALOG_KEY: ${{ inputs.catalog_key }}
+          WHISPER_MODEL: ${{ inputs.whisper_model }}
+          JOB_ID: ${{ github.run_id }}
+        run: |
+          python -m video_editor process-r2 \
+            --clip-key "$CLIP_KEY" \
+            --job-id "$JOB_ID" \
+            --catalog-key "$CATALOG_KEY" \
+            --whisper-model "$WHISPER_MODEL" \
+            --model "$AI_MODEL" \
+            --ollama-url "$OLLAMA_HOST"
+
+      - name: Deliver edited output to Telegram
+        if: success() && steps.edit.outputs.output_key != ''
+        shell: bash
+        env:
+          OUTPUT_KEY: ${{ steps.edit.outputs.output_key }}
+          MANIFEST_KEY: ${{ steps.edit.outputs.manifest_key }}
+        run: |
+          python -m video_editor.telegram_delivery \
+            --output-key "$OUTPUT_KEY" \
+            --manifest-key "$MANIFEST_KEY"

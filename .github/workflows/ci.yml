@@ -1,0 +1,31 @@
+name: Editor tests
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependency
+        run: python -m pip install --upgrade pytest boto3 requests
+      - name: Validate workflow YAML
+        run: ruby -e 'require "yaml"; YAML.parse_file(".github/workflows/edit-clip.yml"); YAML.parse_file(".github/workflows/ci.yml")'
+      - name: Run unit tests
+        run: python -m pytest

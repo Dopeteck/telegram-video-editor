@@ -1,0 +1,13 @@
+{
+  "assets": [
+    {
+      "id": "city-traffic-night-01",
+      "key": "broll/city-traffic-night-01.mp4",
+      "description": "Wide cinematic view of night traffic moving through a modern city, headlights and street lights visible",
+      "tags": ["city", "traffic", "night", "urban", "transport"],
+      "source_url": "https://replace-with-the-original-source-page.example/",
+      "license": "Replace with the exact licence/permission and permitted uses",
+      "rights_verified": false
+    }
+  ]
+}
