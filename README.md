@@ -43,6 +43,14 @@ For delivery to a private chat, open your bot and send `/start` once so Telegram
 
 The R2 credentials need permission to read completed clips and B-roll assets, and write under the `edited/` prefix. Do not paste credentials into workflow inputs, code, issues, or chat.
 
+## Telegram B-roll uploader
+
+A separate, allowlisted Telegram bot can receive short video assets, save them to the existing R2 bucket under `broll/uploads/`, collect descriptions/tags/source/licence details, and append approved entries to `broll/catalog.json`. It does not reuse the existing clipper bot token or webhook.
+
+- Worker implementation: [workers/broll-uploader](workers/broll-uploader/README.md)
+- Deployment: GitHub Actions → **Deploy Telegram B-roll uploader** (manual workflow)
+- Telegram's standard Bot API download limit is 20 MB; larger-file Mini App uploads are a future enhancement.
+
 ## B-roll catalogue
 
 Upload a JSON catalogue to R2 at `broll/catalog.json`. Start from [broll/catalog.example.json](broll/catalog.example.json). Each entry needs a unique ID, a key under `broll/`, a description, tags, a source URL, a licence note, and `rights_verified: true` only after you have checked the actual usage rights. Upload the matching video file to the specified key.
