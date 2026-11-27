@@ -19,6 +19,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -27,5 +31,7 @@ jobs:
         run: python -m pip install --upgrade pytest boto3 requests
       - name: Validate workflow YAML
         run: ruby -e 'require "yaml"; YAML.parse_file(".github/workflows/edit-clip.yml"); YAML.parse_file(".github/workflows/ci.yml")'
-      - name: Run unit tests
+      - name: Run Python unit tests
         run: python -m pytest
+      - name: Run Telegram uploader tests
+        run: node --test workers/broll-uploader/test/*.test.mjs
