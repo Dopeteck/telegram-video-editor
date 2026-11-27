@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 import urllib.error
@@ -83,7 +84,8 @@ def parse_catalog(payload: dict[str, Any]) -> list[BrollAsset]:
         parts = key.split("/")
         suffix = "." + key.rsplit(".", 1)[-1].lower() if "." in key else ""
         if (
-            not asset_id or asset_id in seen
+            not asset_id or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", asset_id)
+            or asset_id in seen
             or not key.startswith("broll/") or key.startswith("/")
             or ".." in parts or suffix not in SUPPORTED_VIDEO_SUFFIXES
             or not description or not source_url.startswith(("https://", "http://"))
@@ -359,6 +361,14 @@ def process_r2_clip(
     clip_key = clip_key.strip()
     if not clip_key or clip_key.startswith("/") or ".." in clip_key.split("/"):
         raise ValueError("clip_key must be a relative R2 key without '..' path parts.")
+    if not clip_key.startswith("jobs/"):
+        raise ValueError("Source clip key must be inside the original jobs/ prefix.")
+    if PurePosixPath(clip_key).suffix.lower() != ".mp4":
+        raise ValueError("Source clip must be an MP4 object.")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", str(job_id)):
+        raise ValueError("job_id may contain only letters, numbers, underscores, and hyphens.")
+    if not catalog_key.startswith("broll/") or ".." in catalog_key.split("/"):
+        raise ValueError("catalog_key must be a relative object key inside broll/.")
     if clip_key.startswith("edited/"):
         raise ValueError("Use an original jobs/ clip as input, not an already edited result.")
     if output_prefix.strip("/") != "edited":
