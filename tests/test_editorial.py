@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import video_editor.engine as engine
 from video_editor.editorial import (
@@ -24,6 +25,69 @@ def test_callout_must_be_an_exact_transcript_excerpt():
     assert len(punch_ins) == 1
     assert [cue.text for cue in callouts] == ["$1.6 trillion"]
     assert any("exact phrase" in reason for reason in rejected)
+
+
+
+def test_callout_timing_must_match_when_the_phrase_is_spoken():
+    words = (
+        engine.TranscriptWord(10.2, 10.5, "The"),
+        engine.TranscriptWord(10.5, 10.9, "market"),
+        engine.TranscriptWord(10.9, 11.2, "cap"),
+        engine.TranscriptWord(11.2, 11.6, "is"),
+        engine.TranscriptWord(11.6, 12.0, "$1.6"),
+        engine.TranscriptWord(12.0, 12.6, "trillion."),
+    )
+    transcript = [
+        engine.TranscriptSegment(
+            10.2, 12.6, "The market cap is $1.6 trillion.", words
+        )
+    ]
+    payload = {
+        "punch_ins": [],
+        "callouts": [{"start": 1.0, "end": 4.0, "text": "$1.6 trillion"}],
+    }
+    _, callouts, rejected = validate_editorial_cues(
+        payload,
+        duration=30,
+        transcript_text="The market cap is $1.6 trillion.",
+        transcript_segments=transcript,
+    )
+    assert callouts == ()
+    assert any("timing does not match" in reason for reason in rejected)
+
+    payload["callouts"][0]["start"] = 10.5
+    payload["callouts"][0]["end"] = 13.0
+    _, callouts, rejected = validate_editorial_cues(
+        payload,
+        duration=30,
+        transcript_text="The market cap is $1.6 trillion.",
+        transcript_segments=transcript,
+    )
+    assert [cue.text for cue in callouts] == ["$1.6 trillion"]
+
+
+def test_caption_detection_fails_safe_when_too_few_frames_are_readable(monkeypatch):
+    monkeypatch.setattr("video_editor.editorial.shutil.which", lambda _: "/usr/bin/tesseract")
+
+    def fake_run(command, **kwargs):
+        if command[0] == "ffmpeg":
+            return SimpleNamespace(stdout=b"")
+        raise AssertionError("Tesseract must not run without an extracted frame")
+
+    monkeypatch.setattr("video_editor.editorial.subprocess.run", fake_run)
+    assert detect_burned_in_captions(Path("clip.mp4"), 90, sample_count=8) is None
+
+
+def test_caption_detection_returns_false_only_after_enough_successful_ocr_samples(monkeypatch):
+    monkeypatch.setattr("video_editor.editorial.shutil.which", lambda _: "/usr/bin/tesseract")
+
+    def fake_run(command, **kwargs):
+        if command[0] == "ffmpeg":
+            return SimpleNamespace(stdout=b"frame")
+        return SimpleNamespace(stdout="level\\ttext\\n")
+
+    monkeypatch.setattr("video_editor.editorial.subprocess.run", fake_run)
+    assert detect_burned_in_captions(Path("clip.mp4"), 90, sample_count=8) is False
 
 
 def test_editorial_cues_reject_overlap_and_extreme_zoom():
