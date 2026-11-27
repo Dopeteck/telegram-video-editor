@@ -13,7 +13,7 @@ A **separate post-processing system** for finished clips produced by Chopify. It
 - Selects B-roll **only** from an asset catalogue whose entries record a source, licence, and `rights_verified: true`.
 - Adds restrained, timed speaker punch-ins and designed callout graphics. Callout text must be an exact phrase from the transcript.
 - Detects likely burned-in subtitles with Tesseract OCR. In `auto` mode it preserves existing captions and adds new ones only when no existing text is detected; uncertain OCR fails safe and preserves the source.
-- Wraps any newly generated captions within safe frame margins, normalises dialogue loudness, and uploads a separate MP4 plus an edit-plan JSON manifest.
+- When captions are needed, uses Faster-Whisper word timestamps to render short karaoke-style caption beats with an active-word highlight and safe frame margins. It also normalises dialogue loudness and uploads a separate MP4 plus an edit-plan JSON manifest.
 - Delivers the edited result into Telegram automatically when Telegram secrets are configured.
 
 If the B-roll catalogue is missing or empty, the local AI planner still chooses useful punch-ins and transcript-grounded callouts. It does not invent footage or download random stock video. In the manual workflow, `caption_mode` defaults to `auto`; `preserve` never adds subtitles, and `force` is only for a source known to have no burned-in captions.
@@ -24,7 +24,7 @@ If the B-roll catalogue is missing or empty, the local AI planner still chooses 
 2. Open **Actions → Edit finished clip → Run workflow** in this repository.
 3. Enter the exact R2 object key in `clip_key`.
 4. The editor transcribes, plans, renders, and writes a new result to `edited/<workflow_run_id>/`.
-5. The local AI planner proposes contextual B-roll, emphasis punch-ins, and exact-phrase callouts; deterministic validation rejects unsafe timestamps, invented B-roll IDs, and callout text that is not present in the transcript.
+5. The local AI planner proposes contextual B-roll, emphasis punch-ins, and exact-phrase callouts; deterministic validation rejects unsafe timestamps, invented B-roll IDs, callout text absent from the transcript, and callouts timed over the wrong spoken phrase.
 6. The renderer checks for source subtitles before adding any new captions, applies the selected visual edits, and normalises dialogue loudness.
 7. If Telegram secrets are configured, the editor sends the MP4 to your Telegram chat. Files within 49 MB are sent as native Telegram videos. Larger files arrive as a private download button with a 24-hour signed R2 URL.
 8. The original clip remains unchanged.
@@ -67,7 +67,7 @@ The R2 workflow is manual-only. No clip-processing run is started by a push or p
 ## Quality roadmap
 
 1. **Current branch work:** AI planning without requiring B-roll, controlled emphasis zooms, transcript-grounded callout graphics, subtitle detection/preservation, safe caption wrapping, and dialogue loudness normalisation.
-2. **Next visual pass:** speaker-aware portrait reframing, scene-aware cut timing, animated word-level captions only when the source has none, and smoother transitions.
+2. **Next visual pass:** face-aware portrait reframing, scene-aware cut timing, smoother transitions, and a preview/approval step.
 3. Curated rights-cleared B-roll and optional licensed sound effects/music.
 4. Review UX: compare original and edited versions, approve/reject before publishing.
 5. Optional automation only after repeatable quality reviews; the clipper stays unchanged.
