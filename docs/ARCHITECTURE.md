@@ -40,8 +40,9 @@ Download one exact R2 object key
 - B-roll must come from the user's own/cleared R2 library. No automatic stock-site scraping.
 - An asset is eligible only when its catalogue row has a source URL, licence note, and `rights_verified: true`.
 - AI-generated asset IDs not present in the catalogue are rejected. Invalid, out-of-range, overlapping cues are rejected.
-- Punch-ins are restricted to modest zoom values and bounded durations. Callouts must be exact contiguous phrases from the transcript.
-- The default caption policy uses OCR to detect existing burned-in text. If OCR is unavailable or uncertain, it preserves the source rather than risking duplicate captions.
+- Punch-ins are restricted to modest zoom values and bounded durations. Callouts must be exact contiguous phrases from the transcript and their on-screen time must overlap the matching spoken words.
+- The default caption policy uses OCR to detect existing burned-in text. A negative detection is only trusted after enough frames are successfully sampled; if OCR is unavailable or uncertain, the source is preserved rather than risking duplicate captions.
+- New captions use Faster-Whisper word timestamps in short karaoke-style beats with active-word highlighting, and are rendered only when the caption policy allows them.
 - B-roll audio is never mixed into the output. Dialogue stays on the original audio stream and receives loudness normalisation.
 - The model produces a plan; deterministic validation and FFmpeg perform the render.
 
