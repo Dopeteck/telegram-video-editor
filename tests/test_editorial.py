@@ -170,7 +170,7 @@ def test_word_timed_captions_render_in_short_karaoke_beats(tmp_path):
         if line.startswith("Dialogue:")
     ]
     assert len(dialogue) == 2
-    assert all(r"{\\kf" in line for line in dialogue)
+    assert all(r"{\kf" in line for line in dialogue)
     assert "The" in dialogue[0]
     assert "$1.6" in dialogue[1]
     assert "trillion" in dialogue[1]
