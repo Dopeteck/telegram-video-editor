@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.env
+.env.*
+!.env.example
+work/
+output/
+assets/broll/*
+!assets/broll/.gitkeep
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.srt
+*.ass

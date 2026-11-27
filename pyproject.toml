@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telegram-video-editor"
+version = "0.1.0"
+description = "Standalone AI-assisted post-processing for finished short-form video clips."
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+include = ["video_editor*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
