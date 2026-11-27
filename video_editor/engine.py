@@ -361,6 +361,31 @@ def build_filter_complex(
 ) -> str:
     filters = ["[0:v]format=yuv420p[base0]"]
     current = "base0"
+
+    # Emphasis zooms affect the speaker footage first. Full-frame B-roll is
+    # composited afterwards so a punch-in never accidentally zooms a cutaway.
+    for index, cue in enumerate(punch_ins or [], start=1):
+        start, end = f"{cue.start:.3f}", f"{cue.end:.3f}"
+        zoom_width = math.ceil(width * cue.zoom / 2) * 2
+        zoom_height = math.ceil(height * cue.zoom / 2) * 2
+        fade_out_start = max(cue.start, cue.end - 0.22)
+        base_label, zoom_source, zoom_label, output_label = (
+            f"pbase{index}", f"pzoomsrc{index}", f"pzoom{index}", f"punch{index}"
+        )
+        filters.append(f"[{current}]split=2[{base_label}][{zoom_source}]")
+        filters.append(
+            f"[{zoom_source}]scale={zoom_width}:{zoom_height}:flags=lanczos,"
+            f"crop={width}:{height}:(iw-ow)/2:(ih-oh)/2,format=yuva420p,"
+            f"fade=t=in:st={start}:d=0.22:alpha=1,"
+            f"fade=t=out:st={fade_out_start:.3f}:d=0.22:alpha=1[{zoom_label}]"
+        )
+        filters.append(
+            f"[{base_label}][{zoom_label}]overlay=0:0:eof_action=pass:repeatlast=0:"
+            f"enable='between(t,{start},{end})'[{output_label}]"
+        )
+        current = output_label
+
+    # B-roll has priority over speaker zooms and is fitted to the whole canvas.
     for index, cue in enumerate(cues, start=1):
         start, end = f"{cue.start:.3f}", f"{cue.end:.3f}"
         duration = f"{cue.end - cue.start:.3f}"
@@ -376,31 +401,16 @@ def build_filter_complex(
         )
         current = output_label
 
-    for index, cue in enumerate(punch_ins or [], start=1):
-        start, end = f"{cue.start:.3f}", f"{cue.end:.3f}"
-        zoom_width = math.ceil(width * cue.zoom / 2) * 2
-        zoom_height = math.ceil(height * cue.zoom / 2) * 2
-        base_label, zoom_source, zoom_label, output_label = (
-            f"pbase{index}", f"pzoomsrc{index}", f"pzoom{index}", f"punch{index}"
-        )
-        filters.append(f"[{current}]split=2[{base_label}][{zoom_source}]")
-        filters.append(
-            f"[{zoom_source}]scale={zoom_width}:{zoom_height}:flags=lanczos,"
-            f"crop={width}:{height}:(iw-ow)/2:(ih-oh)/2,setsar=1,format=yuv420p[{zoom_label}]"
-        )
-        filters.append(
-            f"[{base_label}][{zoom_label}]overlay=0:0:eof_action=pass:repeatlast=0:"
-            f"enable='between(t,{start},{end})'[{output_label}]"
-        )
-        current = output_label
-
-    font_size = max(28, min(48, int(height * 0.026)))
     for index, cue in enumerate(callouts or [], start=1):
+        safe_font_size = max(
+            22, min(48, int(height * 0.026),
+                    int((width * 0.82) / (max(1, len(cue.text)) * 0.58)))
+        )
         text = _escape_drawtext(cue.text)
         output_label = f"callout{index}"
         filters.append(
             f"[{current}]drawtext=font='Liberation Sans':text='{text}':"
-            f"fontcolor=white:fontsize={font_size}:borderw=2:bordercolor=black@0.85:"
+            f"fontcolor=white:fontsize={safe_font_size}:borderw=2:bordercolor=black@0.85:"
             f"box=1:boxcolor=black@0.72:boxborderw=18:"
             f"x=(w-text_w)/2:y=h*0.14:"
             f"enable='between(t,{cue.start:.3f},{cue.end:.3f})'[{output_label}]"
@@ -412,7 +422,6 @@ def build_filter_complex(
     else:
         filters.append(f"[{current}]null[vout]")
     return ";".join(filters)
-
 
 def render_video(
     input_path: Path,
