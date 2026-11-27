@@ -37,7 +37,8 @@ export function extractVideo(message) {
   const fileName = String(document.file_name || "upload").trim();
   const extension = (fileName.match(/\.[a-z0-9]{2,5}$/i)?.[0] || "").toLowerCase();
   const mimeType = String(document.mime_type || "").toLowerCase();
-  if (!mimeType.startsWith("video/") || !ALLOWED_EXTENSIONS.has(extension)) return null;
+  if (!ALLOWED_EXTENSIONS.has(extension)) return null;
+  if (mimeType && !mimeType.startsWith("video/") && mimeType !== "application/octet-stream") return null;
 
   return {
     fileId: document.file_id,
@@ -211,7 +212,15 @@ async function uploadFromTelegram(env, message, userId, chatId) {
   const id = "br-" + crypto.randomUUID().replaceAll("-", "").slice(0, 16);
   const extension = media.extension || ".mp4";
   const key = UPLOAD_PREFIX + id + extension;
-  const contentType = media.mimeType.startsWith("video/") ? media.mimeType : "video/mp4";
+  const mimeByExtension = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".mkv": "video/x-matroska",
+    ".webm": "video/webm",
+  };
+  const contentType = media.mimeType.startsWith("video/")
+    ? media.mimeType
+    : mimeByExtension[extension] || "video/mp4";
 
   await env.BROLL_BUCKET.put(key, bytes, {
     httpMetadata: { contentType },
@@ -292,7 +301,7 @@ async function handleMetadataMessage(env, message, pending, userId, chatId) {
   }
 }
 
-async function mergeAssetIntoCatalog(bucket, asset) {
+export async function mergeAssetIntoCatalog(bucket, asset) {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const current = await bucket.get(CATALOG_KEY);
     let catalog = { assets: [] };
@@ -307,7 +316,9 @@ async function mergeAssetIntoCatalog(bucket, asset) {
       }
     }
 
-    if (catalog.assets.some((row) => row?.id === asset.id || row?.key === asset.key)) {
+    const duplicate = catalog.assets.find((row) => row?.id === asset.id || row?.key === asset.key);
+    if (duplicate) {
+      if (duplicate.id === asset.id && duplicate.key === asset.key) return catalog.assets.length;
       throw new Error("This asset ID or R2 key already exists in the B-roll catalogue.");
     }
 
