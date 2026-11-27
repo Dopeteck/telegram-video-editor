@@ -8,6 +8,7 @@ from video_editor.engine import (
     CalloutCue,
     PunchInCue,
     TranscriptSegment,
+    TranscriptWord,
     build_filter_complex,
     probe_video,
     render_video,
@@ -32,7 +33,7 @@ def test_source_caption_preservation_can_skip_subtitle_filter():
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg is not installed")
-def test_ffmpeg_renders_zoom_and_callout_and_preserves_audio(tmp_path):
+def test_ffmpeg_renders_zoom_callout_karaoke_captions_and_preserves_audio(tmp_path):
     source = tmp_path / "source.mp4"
     output = tmp_path / "edited.mp4"
     subprocess.run(
@@ -50,11 +51,19 @@ def test_ffmpeg_renders_zoom_and_callout_and_preserves_audio(tmp_path):
         source,
         {},
         [],
-        [TranscriptSegment(0, 3, "A synthetic test sentence.")],
+        [TranscriptSegment(
+            0, 3, "A synthetic test sentence.",
+            (
+                TranscriptWord(0.0, 0.25, "A"),
+                TranscriptWord(0.25, 0.55, "synthetic"),
+                TranscriptWord(0.55, 0.85, "test"),
+                TranscriptWord(0.85, 1.2, "sentence."),
+            ),
+        )],
         output,
         punch_ins=[PunchInCue(0.5, 2.5, 1.10, "Test emphasis")],
         callouts=[CalloutCue(1.0, 2.8, "A synthetic fact", "Test graphic")],
-        add_captions=False,
+        add_captions=True,
     )
     details = probe_video(output)
     assert details["width"] == 360
