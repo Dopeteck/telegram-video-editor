@@ -1,30 +1,53 @@
-"""R2 ingestion, local AI planning, strict validation, and FFmpeg rendering."""
+"""R2 ingestion, local AI planning, editorial rendering, and FFmpeg output."""
 
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
 import tempfile
+import textwrap
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .editorial import (
+    CalloutCue,
+    PunchInCue,
+    detect_burned_in_captions,
+    validate_editorial_cues,
+)
+
 SUPPORTED_VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm"}
-SYSTEM_PROMPT = """You are a careful short-form documentary video editor.
-Create a restrained edit plan for this finished clip.
-Choose B-roll only from the supplied catalogue. Never invent an asset ID.
-B-roll must illustrate the exact point being discussed, not merely look attractive.
-Do not cover an important speaker reaction. Do not add cutaways just to fill space.
+SYSTEM_PROMPT = """You are a senior short-form documentary editor, not a caption generator.
+Create a restrained but noticeable editorial plan for the supplied finished clip.
+Make useful decisions even when the B-roll catalogue is empty.
+Use the transcript timestamps to choose the strongest moments; never invent facts.
 Return JSON only:
-{"title":"short editorial title","broll_cues":[
- {"start":12.0,"end":17.0,"asset_id":"exact-catalogue-id","reason":"brief visual match"}
-]}
-Use at most 6 cues. Each cue must be 2–8 seconds, inside the clip, and cues cannot overlap.
-Leave broll_cues empty when the library has no suitable match."""
+{
+  "title": "short editorial title",
+  "broll_cues": [
+    {"start": 12.0, "end": 17.0, "asset_id": "exact-catalogue-id", "reason": "why this shot supports the point"}
+  ],
+  "punch_ins": [
+    {"start": 21.0, "end": 25.0, "zoom": 1.10, "reason": "specific moment of emphasis"}
+  ],
+  "callouts": [
+    {"start": 32.0, "end": 35.0, "text": "exact words from transcript", "reason": "why this phrase deserves visual emphasis"}
+  ]
+}
+Rules:
+- B-roll: use only supplied catalogue IDs; never invent an asset. At most 6 cues, 2–8 seconds each, non-overlapping. Do not add generic filler.
+- Punch-ins: choose at most 4 genuinely useful emphasis moments, 2–8 seconds each, zoom 1.05–1.18, with no overlap. Avoid random zooming.
+- Callouts: choose at most 3 high-value facts, numbers, or concepts. Text must be an exact contiguous phrase from the transcript, at most 34 characters, one line, 1.5–5 seconds, and non-overlapping. Do not paraphrase, add claims, or repeat ordinary dialogue.
+- A callout is a designed graphic emphasis, not a subtitle. Place it in the upper safe area; the renderer handles placement.
+- Do not propose subtitles. Existing burned-in subtitles are preserved; new captions are added only after a separate detection check.
+- If an edit does not improve clarity or emphasis, leave its cue list empty.
+- Keep all cue times inside the clip and do not overlap cues of the same type."""
 
 
 @dataclass(frozen=True)
@@ -57,12 +80,16 @@ class BrollCue:
 class EditPlan:
     title: str
     broll_cues: tuple[BrollCue, ...]
+    punch_ins: tuple[PunchInCue, ...] = ()
+    callouts: tuple[CalloutCue, ...] = ()
     rejected_cues: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "title": self.title,
             "broll_cues": [asdict(cue) for cue in self.broll_cues],
+            "punch_ins": [asdict(cue) for cue in self.punch_ins],
+            "callouts": [asdict(cue) for cue in self.callouts],
             "rejected_cues": list(self.rejected_cues),
         }
 
@@ -104,6 +131,7 @@ def validate_edit_plan(
     duration: float,
     assets: list[BrollAsset],
     *,
+    transcript: list[TranscriptSegment] | None = None,
     max_cues: int = 6,
     min_cue_seconds: float = 2.0,
     max_cue_seconds: float = 8.0,
@@ -147,7 +175,13 @@ def validate_edit_plan(
             rejected.append(f"{cue.asset_id}: overlapping cue rejected")
         else:
             non_overlapping.append(cue)
-    return EditPlan(title, tuple(non_overlapping), tuple(rejected))
+
+    transcript_text = " ".join(segment.text for segment in (transcript or []))
+    punch_ins, callouts, editorial_rejections = validate_editorial_cues(
+        payload, duration, transcript_text
+    )
+    rejected.extend(editorial_rejections)
+    return EditPlan(title, tuple(non_overlapping), punch_ins, callouts, tuple(rejected))
 
 
 def load_broll_catalog(client, bucket: str, catalog_key: str) -> list[BrollAsset]:
@@ -200,10 +234,6 @@ def create_edit_plan(
 ) -> EditPlan:
     if not transcript:
         raise ValueError("Cannot plan an edit without transcript segments.")
-    # A missing/empty cleared-footage library is not a reason to fail an edit.
-    # The deterministic render still adds captions and preserves original audio.
-    if not assets:
-        return EditPlan("Edited clip", ())
     transcript_text = "\n".join(
         f"[{_timestamp(row.start)} - {_timestamp(row.end)}] {row.text}" for row in transcript
     )
@@ -215,11 +245,14 @@ def create_edit_plan(
         "clip_duration_seconds": round(duration, 2),
         "transcript": transcript_text[:14000],
         "available_rights_cleared_broll": catalogue,
-        "instruction": "Return a conservative edit plan. Do not create facts or assets.",
+        "instruction": (
+            "Return editorial decisions for this clip. Even with an empty B-roll list, "
+            "consider restrained punch-ins and exact-transcript callouts. Do not invent facts."
+        ),
     }
     body = {
         "model": model, "stream": False, "format": "json",
-        "options": {"temperature": 0.15, "num_ctx": 8192, "num_predict": 700},
+        "options": {"temperature": 0.15, "num_ctx": 8192, "num_predict": 1100},
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
@@ -243,7 +276,7 @@ def create_edit_plan(
         payload = json.loads(result.get("message", {}).get("content", ""))
     except (TypeError, json.JSONDecodeError) as exc:
         raise ValueError("Ollama did not return a valid JSON edit plan.") from exc
-    return validate_edit_plan(payload, duration, assets)
+    return validate_edit_plan(payload, duration, assets, transcript=transcript)
 
 
 def probe_video(path: Path) -> dict[str, Any]:
@@ -260,6 +293,22 @@ def probe_video(path: Path) -> dict[str, Any]:
     }
 
 
+def resolve_caption_policy(mode: str, video_path: Path, duration: float) -> tuple[bool, str]:
+    """Decide whether to add captions, failing safe when existing text is uncertain."""
+    if mode not in {"auto", "preserve", "force"}:
+        raise ValueError("caption_mode must be one of: auto, preserve, force.")
+    if mode == "preserve":
+        return False, "preserve_source_captions"
+    if mode == "force":
+        return True, "forced_new_captions"
+    detected = detect_burned_in_captions(video_path, duration)
+    if detected is True:
+        return False, "existing_burned_in_captions_detected"
+    if detected is False:
+        return True, "no_existing_burned_in_captions_detected"
+    return False, "caption_detection_unavailable_preserved_source"
+
+
 def _ass_timestamp(seconds: float) -> str:
     whole = max(0, int(seconds * 100))
     hours, remainder = divmod(whole, 360000)
@@ -269,13 +318,15 @@ def _ass_timestamp(seconds: float) -> str:
 
 
 def write_ass_captions(transcript: list[TranscriptSegment], destination: Path, width: int, height: int) -> None:
-    font_size = max(34, min(64, int(height * 0.034)))
-    margin_v = max(90, int(height * 0.075))
+    font_size = max(34, min(64, int(height * 0.032)))
+    margin_h = max(48, int(width * 0.075))
+    margin_v = max(96, int(height * 0.13))
+    max_chars = max(16, int((width - 2 * margin_h) / (font_size * 0.52)))
     lines = [
-        "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}", "WrapStyle: 2", "",
+        "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}", "WrapStyle: 0", "",
         "[V4+ Styles]",
         "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
-        f"Style: Default,Arial,{font_size},&H00FFFFFF,&H0000FFFF,&H00111111,&H99000000,-1,0,3,2,0,2,70,70,{margin_v},1",
+        f"Style: Default,Liberation Sans,{font_size},&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,1,3,1,2,{margin_h},{margin_h},{margin_v},1",
         "", "[Events]", "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
     ]
     for segment in transcript:
@@ -283,13 +334,31 @@ def write_ass_captions(transcript: list[TranscriptSegment], destination: Path, w
             continue
         caption = str(segment.text).replace("\\", "").replace("{", "(").replace("}", ")").replace("\n", " ").replace("\r", " ")
         if caption:
+            wrapped = textwrap.fill(
+                caption, width=max_chars, break_long_words=True, break_on_hyphens=False
+            ).replace("\n", r"\N")
             lines.append(
-                f"Dialogue: 0,{_ass_timestamp(segment.start)},{_ass_timestamp(segment.end)},Default,,0,0,0,,{caption}"
+                f"Dialogue: 0,{_ass_timestamp(segment.start)},{_ass_timestamp(segment.end)},Default,,0,0,0,,{wrapped}"
             )
     destination.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def build_filter_complex(cues: list[BrollCue], width: int, height: int) -> str:
+def _escape_drawtext(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+        .replace(",", "\\,").replace("%", "\\%").replace("[", "\\[").replace("]", "\\]")
+    )
+
+
+def build_filter_complex(
+    cues: list[BrollCue],
+    width: int,
+    height: int,
+    punch_ins: list[PunchInCue] | None = None,
+    callouts: list[CalloutCue] | None = None,
+    *,
+    include_captions: bool = True,
+) -> str:
     filters = ["[0:v]format=yuv420p[base0]"]
     current = "base0"
     for index, cue in enumerate(cues, start=1):
@@ -306,7 +375,42 @@ def build_filter_complex(cues: list[BrollCue], width: int, height: int) -> str:
             f"enable='between(t,{start},{end})'[{output_label}]"
         )
         current = output_label
-    filters.append(f"[{current}]subtitles=captions.ass[vout]")
+
+    for index, cue in enumerate(punch_ins or [], start=1):
+        start, end = f"{cue.start:.3f}", f"{cue.end:.3f}"
+        zoom_width = math.ceil(width * cue.zoom / 2) * 2
+        zoom_height = math.ceil(height * cue.zoom / 2) * 2
+        base_label, zoom_source, zoom_label, output_label = (
+            f"pbase{index}", f"pzoomsrc{index}", f"pzoom{index}", f"punch{index}"
+        )
+        filters.append(f"[{current}]split=2[{base_label}][{zoom_source}]")
+        filters.append(
+            f"[{zoom_source}]scale={zoom_width}:{zoom_height}:flags=lanczos,"
+            f"crop={width}:{height}:(iw-ow)/2:(ih-oh)/2,setsar=1,format=yuv420p[{zoom_label}]"
+        )
+        filters.append(
+            f"[{base_label}][{zoom_label}]overlay=0:0:eof_action=pass:repeatlast=0:"
+            f"enable='between(t,{start},{end})'[{output_label}]"
+        )
+        current = output_label
+
+    font_size = max(28, min(48, int(height * 0.026)))
+    for index, cue in enumerate(callouts or [], start=1):
+        text = _escape_drawtext(cue.text)
+        output_label = f"callout{index}"
+        filters.append(
+            f"[{current}]drawtext=font='Liberation Sans':text='{text}':"
+            f"fontcolor=white:fontsize={font_size}:borderw=2:bordercolor=black@0.85:"
+            f"box=1:boxcolor=black@0.72:boxborderw=18:"
+            f"x=(w-text_w)/2:y=h*0.14:"
+            f"enable='between(t,{cue.start:.3f},{cue.end:.3f})'[{output_label}]"
+        )
+        current = output_label
+
+    if include_captions:
+        filters.append(f"[{current}]subtitles=captions.ass[vout]")
+    else:
+        filters.append(f"[{current}]null[vout]")
     return ";".join(filters)
 
 
@@ -316,12 +420,17 @@ def render_video(
     cues: list[BrollCue],
     transcript: list[TranscriptSegment],
     output_path: Path,
+    *,
+    punch_ins: list[PunchInCue] | None = None,
+    callouts: list[CalloutCue] | None = None,
+    add_captions: bool = False,
 ) -> Path:
     details = probe_video(input_path)
     if details["duration"] <= 0:
         raise ValueError("Input clip duration could not be determined.")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    write_ass_captions(transcript, output_path.parent / "captions.ass", details["width"], details["height"])
+    if add_captions:
+        write_ass_captions(transcript, output_path.parent / "captions.ass", details["width"], details["height"])
 
     selected_cues, selected_paths = [], []
     for cue in cues:
@@ -334,12 +443,18 @@ def render_video(
     for path in selected_paths:
         command.extend(["-i", str(path)])
     command.extend([
-        "-filter_complex", build_filter_complex(selected_cues, details["width"], details["height"]),
+        "-filter_complex", build_filter_complex(
+            selected_cues, details["width"], details["height"],
+            punch_ins=punch_ins, callouts=callouts, include_captions=add_captions,
+        ),
         "-map", "[vout]", "-map", "0:a?", "-t", f"{details['duration']:.3f}",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "19",
         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
-        "-movflags", "+faststart", str(output_path),
+        "-movflags", "+faststart",
     ])
+    if details["has_audio"]:
+        command.extend(["-af", "loudnorm=I=-16:TP=-1.5:LRA=11"])
+    command.append(str(output_path))
     subprocess.run(command, check=True, cwd=str(output_path.parent))
     if not output_path.is_file() or output_path.stat().st_size == 0:
         raise RuntimeError("FFmpeg did not produce a rendered output.")
@@ -379,6 +494,7 @@ def process_r2_clip(
     model: str = "qwen3:4b-instruct-2507-q4_K_M",
     whisper_model: str = "small",
     ollama_url: str = "http://127.0.0.1:11434",
+    caption_mode: str = "auto",
 ) -> dict[str, Any]:
     clip_key = clip_key.strip()
     if not clip_key or clip_key.startswith("/") or ".." in clip_key.split("/"):
@@ -391,10 +507,10 @@ def process_r2_clip(
         raise ValueError("job_id may contain only letters, numbers, underscores, and hyphens.")
     if not catalog_key.startswith("broll/") or ".." in catalog_key.split("/"):
         raise ValueError("catalog_key must be a relative object key inside broll/.")
-    if clip_key.startswith("edited/"):
-        raise ValueError("Use an original jobs/ clip as input, not an already edited result.")
     if output_prefix.strip("/") != "edited":
         raise ValueError("Output prefix is fixed to edited/ to protect original clip objects.")
+    if caption_mode not in {"auto", "preserve", "force"}:
+        raise ValueError("caption_mode must be one of: auto, preserve, force.")
 
     bucket = os.environ.get("R2_BUCKET", "telegram-video-clipper-uploads").strip()
     client = create_r2_client()
@@ -402,8 +518,6 @@ def process_r2_clip(
         workdir = Path(temp_dir)
         clip_path = workdir / "input" / PurePosixPath(clip_key).name
         clip_path.parent.mkdir(parents=True, exist_ok=True)
-        if ".." in clip_key.split("/"):
-            raise ValueError("Unsafe source object key.")
         client.download_file(bucket, clip_key, str(clip_path))
         if not clip_path.is_file() or clip_path.stat().st_size == 0:
             raise RuntimeError(f"R2 download was empty: {clip_key}")
@@ -423,10 +537,17 @@ def process_r2_clip(
                 raise RuntimeError(f"Selected B-roll asset download was empty: {asset.asset_id}")
             broll_paths[asset.asset_id] = path
 
+        add_captions, caption_decision = resolve_caption_policy(
+            caption_mode, clip_path, details["duration"]
+        )
         output_name = f"{clip_path.stem}.edited.mp4"
         output_path = workdir / "output" / output_name
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        render_video(clip_path, broll_paths, list(plan.broll_cues), transcript, output_path)
+        render_video(
+            clip_path, broll_paths, list(plan.broll_cues), transcript, output_path,
+            punch_ins=list(plan.punch_ins), callouts=list(plan.callouts),
+            add_captions=add_captions,
+        )
         output_key = f"edited/{job_id}/{output_name}"
         if output_key == clip_key:
             raise RuntimeError("Output key unexpectedly matches the source key.")
@@ -435,7 +556,10 @@ def process_r2_clip(
             "source_key": clip_key, "output_key": output_key,
             "duration_seconds": round(details["duration"], 3), "language": language,
             "model": model, "whisper_model": whisper_model, "title": plan.title,
+            "caption_mode": caption_mode, "caption_decision": caption_decision,
             "broll_cues": [asdict(cue) for cue in plan.broll_cues],
+            "punch_ins": [asdict(cue) for cue in plan.punch_ins],
+            "callouts": [asdict(cue) for cue in plan.callouts],
             "rejected_cues": list(plan.rejected_cues),
             "broll_asset_sources": {
                 cue.asset_id: {
@@ -454,5 +578,7 @@ def process_r2_clip(
         return {
             "source_key": clip_key, "output_key": output_key, "manifest_key": manifest_key,
             "title": plan.title, "broll_count": len(plan.broll_cues),
+            "punch_in_count": len(plan.punch_ins), "callout_count": len(plan.callouts),
+            "caption_decision": caption_decision,
             "duration_seconds": round(details["duration"], 3),
         }
