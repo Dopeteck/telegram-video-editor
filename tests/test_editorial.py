@@ -149,6 +149,34 @@ def test_ass_captions_wrap_long_lines_inside_the_frame(tmp_path):
     assert ",54,54," in result or ",48,48," in result
 
 
+
+def test_word_timed_captions_render_in_short_karaoke_beats(tmp_path):
+    words = (
+        engine.TranscriptWord(0.0, 0.25, "The"),
+        engine.TranscriptWord(0.25, 0.55, "market"),
+        engine.TranscriptWord(0.55, 0.8, "cap"),
+        engine.TranscriptWord(0.8, 1.0, "is"),
+        engine.TranscriptWord(1.0, 1.35, "about"),
+        engine.TranscriptWord(1.35, 1.75, "$1.6"),
+        engine.TranscriptWord(1.75, 2.1, "trillion."),
+    )
+    transcript = [engine.TranscriptSegment(
+        0.0, 2.2, "The market cap is about $1.6 trillion.", words
+    )]
+    path = tmp_path / "karaoke.ass"
+    engine.write_ass_captions(transcript, path, 720, 1280)
+    dialogue = [
+        line for line in path.read_text(encoding="utf-8").splitlines()
+        if line.startswith("Dialogue:")
+    ]
+    assert len(dialogue) == 2
+    assert all(r"{\\kf" in line for line in dialogue)
+    assert "The" in dialogue[0]
+    assert "$1.6" in dialogue[1]
+    assert "trillion" in dialogue[1]
+
+
+
 def test_filter_graph_has_speaker_punch_in_and_designed_callout_without_subtitles():
     graph = engine.build_filter_complex(
         [],
