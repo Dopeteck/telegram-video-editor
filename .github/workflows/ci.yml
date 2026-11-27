@@ -30,7 +30,11 @@ jobs:
       - name: Install test dependency
         run: python -m pip install --upgrade pytest boto3 requests
       - name: Validate workflow YAML
-        run: ruby -e 'require "yaml"; YAML.parse_file(".github/workflows/edit-clip.yml"); YAML.parse_file(".github/workflows/ci.yml")'
+        run: ruby -e 'require "yaml"; YAML.parse_file(".github/workflows/edit-clip.yml"); YAML.parse_file(".github/workflows/deploy-broll-uploader.yml"); YAML.parse_file(".github/workflows/ci.yml")'
+      - name: Install Wrangler
+        run: npm install --global wrangler@4
+      - name: Validate B-roll Worker bundle
+        run: wrangler deploy --dry-run --config workers/broll-uploader/wrangler.toml
       - name: Run Python unit tests
         run: python -m pytest
       - name: Run Telegram uploader tests
