@@ -44,6 +44,8 @@ def _phrase_tokens(value: str) -> list[str]:
 def _find_timed_phrase(
     phrase: str,
     transcript_segments: Sequence[Any],
+    *,
+    near: float | None = None,
 ) -> tuple[float, float] | None:
     """Find the closest timed occurrence of a phrase in a timestamped transcript."""
     target = _phrase_tokens(phrase)
@@ -77,7 +79,11 @@ def _find_timed_phrase(
         window = timed_tokens[index:index + len(target)]
         if [item[0] for item in window] == target:
             matches.append((window[0][1], window[-1][2]))
-    return matches[0] if matches else None
+    if not matches:
+        return None
+    if near is None:
+        return matches[0]
+    return min(matches, key=lambda match: abs(match[0] - near))
 
 
 def validate_editorial_cues(
@@ -163,7 +169,7 @@ def validate_editorial_cues(
             rejected.append(f"callout {index + 1}: text is not an exact phrase from the transcript")
             continue
         if transcript_segments:
-            spoken_window = _find_timed_phrase(phrase, transcript_segments)
+            spoken_window = _find_timed_phrase(phrase, transcript_segments, near=start)
             if spoken_window is None:
                 rejected.append(f"callout {index + 1}: spoken phrase could not be located in timestamped words")
                 continue
