@@ -14,7 +14,7 @@ A **separate post-processing system** for finished clips produced by Chopify. It
 - Uses FFmpeg to insert relevant full-frame B-roll cutaways while preserving the clip's original dialogue/audio.
 - Burns in clean captions and uploads a separate MP4 plus an edit-plan JSON manifest.
 
-The editor skips B-roll when no suitable licensed/owned asset is available. It will not download random footage from the internet or invent asset URLs.
+The editor skips B-roll when no suitable licensed/owned asset is available. If the catalogue is missing or empty, it still produces a captioned edit with the original audio; it will not download random footage from the internet or invent asset URLs.
 
 ## Workflow
 
