@@ -25,6 +25,10 @@ def test_catalog_only_accepts_rights_verified_assets_with_source_and_license():
          "source_url": "https://example.com/source", "license": "Owned",
          "rights_verified": True},
     ]})
+        {"id": "../escape", "key": "broll/escape.mp4", "description": "Bad ID",
+         "source_url": "https://example.com/source", "license": "Owned",
+         "rights_verified": True},
+    ]})
     assert [asset.asset_id for asset in assets] == ["ok"]
 
 
