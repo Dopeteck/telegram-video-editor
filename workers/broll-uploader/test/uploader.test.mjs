@@ -10,6 +10,7 @@ import {
   validateLicense,
   validateSourceUrl,
 } from "../src/index.mjs";
+import uploader from "../src/index.mjs";
 
 test("allowlist matches exact numeric Telegram IDs", () => {
   assert.equal(isAllowedUser(12345, "12345,67890"), true);
@@ -73,4 +74,51 @@ test("source URLs must be absolute HTTP(S) webpages", () => {
 test("licence notes are required and bounded", () => {
   assert.equal(validateLicense("Pexels License; commercial use"), "Pexels License; commercial use");
   assert.throws(() => validateLicense("free"), /Licence details/);
+});
+
+
+test("health endpoint reports the uploader service", async () => {
+  const response = await uploader.fetch(
+    new Request("https://example.workers.dev/health"),
+    {},
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    ok: true,
+    service: "telegram-broll-uploader",
+  });
+});
+
+test("Telegram webhook rejects requests without the configured secret header", async () => {
+  const response = await uploader.fetch(
+    new Request("https://example.workers.dev/telegram/webhook", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    }),
+    {
+      TELEGRAM_BOT_TOKEN: "test-token",
+      TELEGRAM_WEBHOOK_SECRET: "expected-secret",
+    },
+  );
+  assert.equal(response.status, 401);
+});
+
+test("Telegram webhook accepts a correctly authenticated empty update", async () => {
+  const response = await uploader.fetch(
+    new Request("https://example.workers.dev/telegram/webhook", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "X-Telegram-Bot-Api-Secret-Token": "expected-secret",
+      },
+      body: "{}",
+    }),
+    {
+      TELEGRAM_BOT_TOKEN: "test-token",
+      TELEGRAM_WEBHOOK_SECRET: "expected-secret",
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
 });
