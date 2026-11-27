@@ -49,6 +49,12 @@ jobs:
       - name: Install Wrangler
         run: npm install --global wrangler@4
 
+      - name: Deploy Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          wrangler deploy --config workers/broll-uploader/wrangler.toml
+
       - name: Configure Worker secrets
         shell: bash
         run: |
@@ -58,12 +64,6 @@ jobs:
           if [ -n "$ALLOWED_TELEGRAM_USER_IDS" ]; then
             printf '%s' "$ALLOWED_TELEGRAM_USER_IDS" | wrangler secret put ALLOWED_TELEGRAM_USER_IDS --config workers/broll-uploader/wrangler.toml
           fi
-
-      - name: Deploy Worker
-        shell: bash
-        run: |
-          set -euo pipefail
-          wrangler deploy --config workers/broll-uploader/wrangler.toml
 
       - name: Register Telegram webhook
         if: inputs.worker_url != ''
