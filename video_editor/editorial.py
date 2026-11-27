@@ -30,7 +30,7 @@ class CalloutCue:
 def _normalise_phrase(value: str) -> str:
     value = value.casefold().replace("’", "'").replace("“", '"').replace("”", '"')
     value = re.sub(r"\s+", " ", value).strip()
-    return value.strip(" \\t\\r\\n\\"'“”‘’.,!?;:")
+    return value.strip(" \t\r\n\"'“”‘’.,!?;:")
 
 
 def validate_editorial_cues(
@@ -108,7 +108,7 @@ def validate_editorial_cues(
         if not 1.5 <= end - start <= 5.0:
             rejected.append(f"callout {index + 1}: duration must be 1.5–5 seconds")
             continue
-        if not phrase or len(phrase) > 34 or "\\n" in phrase or "\\r" in phrase:
+        if not phrase or len(phrase) > 34 or "\n" in phrase or "\r" in phrase:
             rejected.append(f"callout {index + 1}: text must be 1–34 characters on one line")
             continue
         if _normalise_phrase(phrase) not in source_text:
@@ -172,7 +172,7 @@ def detect_burned_in_captions(
                 capture_output=True,
                 text=True,
             ).stdout
-            rows = csv.DictReader(io.StringIO(ocr), delimiter="\\t")
+            rows = csv.DictReader(io.StringIO(ocr), delimiter="\t")
             words: list[str] = []
             confidences: list[float] = []
             for row in rows:
