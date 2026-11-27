@@ -9,12 +9,13 @@ A **separate post-processing system** for finished clips produced by Chopify. It
 - Manual GitHub Actions trigger; no automatic coupling to the clipper.
 - Reads a completed clip from the existing private R2 bucket.
 - Transcribes the short clip locally with Faster-Whisper (no paid transcription API).
-- Uses local Ollama model `qwen3:4b-instruct-2507-q4_K_M` to propose an edit plan.
+- Uses local Ollama model `qwen3:4b-instruct-2507-q4_K_M` to propose an edit plan when cleared B-roll exists.
 - Selects B-roll **only** from an asset catalogue whose entries record a source, licence, and `rights_verified: true`.
 - Uses FFmpeg to insert relevant full-frame B-roll cutaways while preserving the clip's original dialogue/audio.
 - Burns in clean captions and uploads a separate MP4 plus an edit-plan JSON manifest.
+- Delivers the edited result into Telegram automatically when Telegram secrets are configured.
 
-The editor skips B-roll when no suitable licensed/owned asset is available. If the catalogue is missing or empty, it still produces a captioned edit with the original audio and skips the Ollama model download; it will not download random footage from the internet or invent asset URLs.
+If the B-roll catalogue is missing or empty, the editor still produces a captioned edit with the original audio and skips the Ollama model download. It will not download random footage from the internet or invent asset URLs.
 
 ## Workflow
 
@@ -22,17 +23,25 @@ The editor skips B-roll when no suitable licensed/owned asset is available. If t
 2. Open **Actions → Edit finished clip → Run workflow** in this repository.
 3. Enter the exact R2 object key in `clip_key`.
 4. The editor transcribes, plans, renders, and writes a new result to `edited/<workflow_run_id>/`.
-5. Review the rendered MP4 before publishing. The original object remains unchanged.
+5. If Telegram secrets are configured, the editor sends the MP4 to your Telegram chat. Files within 49 MB are sent as native Telegram videos. Larger files arrive as a private download button with a 24-hour signed R2 URL.
+6. The original clip remains unchanged.
 
 ## Repository secrets
 
-Add these three secrets in **Settings → Secrets and variables → Actions**:
+Add these secrets in **Settings → Secrets and variables → Actions**:
 
+**R2 access**
 - `R2_ACCOUNT_ID`
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
 
-The workflow uses the existing bucket name `telegram-video-clipper-uploads`. The R2 credentials need permission to read completed clips and B-roll assets, and write under the `edited/` prefix. Do not paste credentials into workflow inputs, code, issues, or chat.
+**Telegram delivery**
+- `TELEGRAM_BOT_TOKEN`: the token for your existing Telegram bot (the same bot configured in your Cloudflare Worker).
+- `TELEGRAM_CHAT_ID`: your private Telegram chat ID, or an authorized channel/group ID.
+
+For delivery to a private chat, open your bot and send `/start` once so Telegram permits the bot to message you. If Telegram secrets are not configured, the edit still completes and remains in R2, but no Telegram message is sent.
+
+The R2 credentials need permission to read completed clips and B-roll assets, and write under the `edited/` prefix. Do not paste credentials into workflow inputs, code, issues, or chat.
 
 ## B-roll catalogue
 
