@@ -51,3 +51,29 @@ def test_plan_rejects_cue_outside_clip_duration():
         duration=30, assets=[_asset()],
     )
     assert plan.broll_cues == ()
+
+
+
+def test_missing_broll_catalogue_falls_back_to_caption_only():
+    from video_editor.engine import load_broll_catalog
+
+    class MissingObject:
+        def get_object(self, **kwargs):
+            raise type("MissingKey", (Exception,), {
+                "response": {"Error": {"Code": "NoSuchKey"}}
+            })("not found")
+
+    assert load_broll_catalog(MissingObject(), "bucket", "broll/catalog.json") == []
+
+
+def test_empty_broll_library_skips_ollama_planning(monkeypatch):
+    import video_editor.engine as engine
+
+    def unexpected_call(*args, **kwargs):
+        raise AssertionError("Ollama should not be called without B-roll assets")
+
+    monkeypatch.setattr(engine.urllib.request, "urlopen", unexpected_call)
+    transcript = [engine.TranscriptSegment(0.0, 3.0, "This is a sample sentence.")]
+    plan = engine.create_edit_plan(transcript, 10.0, [])
+    assert plan.title == "Edited clip"
+    assert plan.broll_cues == ()
