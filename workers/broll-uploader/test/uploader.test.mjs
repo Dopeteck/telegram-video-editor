@@ -5,6 +5,7 @@ import {
   extractVideo,
   getTelegramUserId,
   isAllowedUser,
+  mergeAssetIntoCatalog,
   parseTags,
   validateDescription,
   validateLicense,
@@ -32,7 +33,7 @@ test("accepts supported video documents but rejects arbitrary documents", () => 
     document: {
       file_id: "doc1",
       file_name: "city-traffic.webm",
-      mime_type: "video/webm",
+      mime_type: "application/octet-stream",
       file_size: 1000,
     },
   });
@@ -121,4 +122,73 @@ test("Telegram webhook accepts a correctly authenticated empty update", async ()
   );
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { ok: true });
+});
+
+
+test("publishing appends a verified asset without replacing existing catalogue entries", async () => {
+  const objects = new Map();
+  let revision = 0;
+  const bucket = {
+    async get(key) {
+      const stored = objects.get(key);
+      if (!stored) return null;
+      return {
+        httpEtag: stored.etag,
+        async json() { return JSON.parse(stored.body); },
+      };
+    },
+    async put(key, body, options) {
+      const current = objects.get(key);
+      if (options.onlyIf?.etagMatches && current?.etag !== options.onlyIf.etagMatches) return null;
+      if (options.onlyIf?.etagDoesNotMatch === "*" && current) return null;
+      objects.set(key, { body: String(body), etag: "etag-" + (++revision) });
+      return {};
+    },
+  };
+
+  const first = {
+    id: "br-1111111111111111",
+    key: "broll/uploads/br-1111111111111111.mp4",
+    description: "A person scrolling on a smartphone outdoors.",
+    tags: ["technology", "smartphone"],
+    source_url: "https://example.com/source",
+    license: "Pexels License; commercial use",
+    rights_verified: true,
+  };
+  const second = { ...first, id: "br-2222222222222222", key: "broll/uploads/br-2222222222222222.mp4" };
+
+  assert.equal(await mergeAssetIntoCatalog(bucket, first), 1);
+  assert.equal(await mergeAssetIntoCatalog(bucket, second), 2);
+  assert.equal(await mergeAssetIntoCatalog(bucket, second), 2);
+
+  const catalog = JSON.parse(objects.get("broll/catalog.json").body);
+  assert.equal(catalog.assets.length, 2);
+  assert.equal(catalog.assets[0].rights_verified, true);
+  assert.equal(catalog.assets[1].id, second.id);
+});
+
+test("publishing refuses to overwrite a malformed B-roll catalogue", async () => {
+  const bucket = {
+    async get() {
+      return {
+        httpEtag: "broken-etag",
+        async json() { throw new Error("invalid JSON"); },
+      };
+    },
+    async put() {
+      throw new Error("should not overwrite invalid JSON");
+    },
+  };
+  await assert.rejects(
+    mergeAssetIntoCatalog(bucket, {
+      id: "br-3333333333333333",
+      key: "broll/uploads/br-3333333333333333.mp4",
+      description: "A person using a laptop in an office.",
+      tags: ["business"],
+      source_url: "https://example.com/source",
+      license: "Original footage owned by uploader",
+      rights_verified: true,
+    }),
+    /invalid JSON/,
+  );
 });
