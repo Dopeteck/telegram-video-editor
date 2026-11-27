@@ -61,7 +61,7 @@ jobs:
       - name: Install FFmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg fonts-liberation
 
       - name: Set up Python
         uses: actions/setup-python@v5
