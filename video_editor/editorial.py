@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Sequence
 
 
 @dataclass(frozen=True)
@@ -33,11 +34,58 @@ def _normalise_phrase(value: str) -> str:
     return value.strip(" \t\r\n\"'“”‘’.,!?;:")
 
 
+
+def _phrase_tokens(value: str) -> list[str]:
+    """Normalise spoken phrases consistently with Whisper's per-word tokens."""
+    value = value.casefold().replace("’", "'")
+    return re.findall(r"[a-z0-9]+(?:'[a-z0-9]+)?", value)
+
+
+def _find_timed_phrase(
+    phrase: str,
+    transcript_segments: Sequence[Any],
+) -> tuple[float, float] | None:
+    """Find the closest timed occurrence of a phrase in a timestamped transcript."""
+    target = _phrase_tokens(phrase)
+    if not target:
+        return None
+
+    timed_tokens: list[tuple[str, float, float]] = []
+    for segment in transcript_segments:
+        words = getattr(segment, "words", ()) or ()
+        if words:
+            for word in words:
+                word_text = str(getattr(word, "text", "") or "")
+                start = getattr(word, "start", None)
+                end = getattr(word, "end", None)
+                if start is None or end is None:
+                    continue
+                for token in _phrase_tokens(word_text):
+                    timed_tokens.append((token, float(start), float(end)))
+        else:
+            # Segment-level fallback keeps older callers usable, but the live
+            # pipeline requests word timestamps so this is only a compatibility path.
+            for token in _phrase_tokens(str(getattr(segment, "text", "") or "")):
+                timed_tokens.append((
+                    token,
+                    float(getattr(segment, "start", 0.0)),
+                    float(getattr(segment, "end", 0.0)),
+                ))
+
+    matches: list[tuple[float, float]] = []
+    for index in range(len(timed_tokens) - len(target) + 1):
+        window = timed_tokens[index:index + len(target)]
+        if [item[0] for item in window] == target:
+            matches.append((window[0][1], window[-1][2]))
+    return matches[0] if matches else None
+
+
 def validate_editorial_cues(
     payload: dict,
     duration: float,
     transcript_text: str,
     *,
+    transcript_segments: Sequence[Any] | None = None,
     max_punch_ins: int = 4,
     max_callouts: int = 3,
 ) -> tuple[tuple[PunchInCue, ...], tuple[CalloutCue, ...], tuple[str, ...]]:
@@ -114,6 +162,17 @@ def validate_editorial_cues(
         if _normalise_phrase(phrase) not in source_text:
             rejected.append(f"callout {index + 1}: text is not an exact phrase from the transcript")
             continue
+        if transcript_segments:
+            spoken_window = _find_timed_phrase(phrase, transcript_segments)
+            if spoken_window is None:
+                rejected.append(f"callout {index + 1}: spoken phrase could not be located in timestamped words")
+                continue
+            spoken_start, spoken_end = spoken_window
+            # Allow a small timing tolerance around Whisper's word boundaries,
+            # but never let a real phrase be displayed over an unrelated moment.
+            if end < spoken_start - 0.75 or start > spoken_end + 0.75:
+                rejected.append(f"callout {index + 1}: cue timing does not match when the phrase is spoken")
+                continue
         callout_candidates.append(CalloutCue(
             start, end, phrase, str(row.get("reason") or "Key phrase")[:180]
         ))
@@ -145,6 +204,7 @@ def detect_burned_in_captions(
         return None
 
     positive_samples = 0
+    usable_samples = 0
     fractions = [
         0.10 + index * (0.80 / (sample_count - 1))
         for index in range(sample_count)
@@ -171,7 +231,9 @@ def detect_burned_in_captions(
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=25,
             ).stdout
+            usable_samples += 1
             rows = csv.DictReader(io.StringIO(ocr), delimiter="\t")
             words: list[str] = []
             confidences: list[float] = []
@@ -191,7 +253,12 @@ def detect_burned_in_captions(
                     positive_samples += 1
             if positive_samples >= 2:
                 return True
-    except (OSError, subprocess.CalledProcessError, UnicodeDecodeError):
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, UnicodeDecodeError):
         return None
 
+    # A negative decision is only reliable when enough frames were actually
+    # extracted and OCR'd. Sparse/failed sampling must preserve the source.
+    minimum_usable_samples = max(3, (sample_count + 1) // 2)
+    if usable_samples < minimum_usable_samples:
+        return None
     return False
