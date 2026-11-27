@@ -342,6 +342,69 @@ def _ass_timestamp(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}.{centiseconds:02d}"
 
 
+def _clean_caption_word(value: str) -> str:
+    return (
+        str(value).replace("\\", "").replace("{", "(").replace("}", ")")
+        .replace("\n", " ").replace("\r", " ").strip()
+    )
+
+
+def _caption_word_chunks(
+    words: list[TranscriptWord],
+    *,
+    max_chars: int,
+    max_words: int = 5,
+    max_duration: float = 2.6,
+) -> list[list[TranscriptWord]]:
+    chunks: list[list[TranscriptWord]] = []
+    current: list[TranscriptWord] = []
+    current_chars = 0
+    for word in words:
+        token = _clean_caption_word(word.text)
+        if not token or word.end <= word.start:
+            continue
+        next_chars = current_chars + (1 if current else 0) + len(token)
+        should_flush = bool(current) and (
+            len(current) >= max_words
+            or word.end - current[0].start > max_duration
+            or next_chars > max_chars * 2
+            or bool(re.search(r"[.!?][\"')\]]?$", _clean_caption_word(current[-1].text)))
+        )
+        if should_flush:
+            chunks.append(current)
+            current = []
+            current_chars = 0
+        current.append(word)
+        current_chars += (1 if current_chars else 0) + len(token)
+        if re.search(r"[.!?][\"')\]]?$", token):
+            chunks.append(current)
+            current = []
+            current_chars = 0
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _render_karaoke_words(words: list[TranscriptWord], max_chars: int) -> str:
+    rendered: list[str] = []
+    line_chars = 0
+    for word in words:
+        token = _clean_caption_word(word.text)
+        if not token:
+            continue
+        separator = " " if line_chars else ""
+        if line_chars and line_chars + len(token) + 1 > max_chars:
+            rendered.append(r"\N")
+            line_chars = 0
+            separator = ""
+        elif separator:
+            rendered.append(separator)
+        duration_cs = max(1, int(round((word.end - word.start) * 100)))
+        rendered.append(f"{{\\kf{duration_cs}}}{token}")
+        line_chars += len(token) + (1 if separator else 0)
+    return "".join(rendered)
+
+
 def write_ass_captions(transcript: list[TranscriptSegment], destination: Path, width: int, height: int) -> None:
     font_size = max(34, min(64, int(height * 0.032)))
     margin_h = max(48, int(width * 0.075))
@@ -357,6 +420,24 @@ def write_ass_captions(transcript: list[TranscriptSegment], destination: Path, w
     for segment in transcript:
         if segment.end <= segment.start:
             continue
+        timed_words = [
+            word for word in segment.words
+            if word.end > word.start and word.start >= segment.start - 0.05 and word.end <= segment.end + 0.05
+        ]
+        if timed_words:
+            for chunk in _caption_word_chunks(timed_words, max_chars=max_chars):
+                start = max(segment.start, chunk[0].start)
+                end = min(segment.end, chunk[-1].end)
+                if end <= start:
+                    continue
+                caption = _render_karaoke_words(chunk, max_chars)
+                if caption:
+                    lines.append(
+                        f"Dialogue: 0,{_ass_timestamp(start)},{_ass_timestamp(end)},Default,,0,0,0,,{caption}"
+                    )
+            continue
+
+        # Compatibility fallback for transcripts created without word timestamps.
         caption = str(segment.text).replace("\\", "").replace("{", "(").replace("}", ")").replace("\n", " ").replace("\r", " ")
         if caption:
             wrapped = textwrap.fill(
