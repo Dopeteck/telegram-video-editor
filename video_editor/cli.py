@@ -4,9 +4,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from .engine import process_r2_clip
+
+
+def _write_github_outputs(result: dict) -> None:
+    output_path = os.environ.get("GITHUB_OUTPUT")
+    if not output_path:
+        return
+    with open(output_path, "a", encoding="utf-8") as output:
+        output.write(f"output_key={result['output_key']}\n")
+        output.write(f"manifest_key={result['manifest_key']}\n")
 
 
 def main() -> None:
@@ -32,6 +42,7 @@ def main() -> None:
                 output_prefix=args.output_prefix, model=args.model,
                 whisper_model=args.whisper_model, ollama_url=args.ollama_url,
             )
+            _write_github_outputs(result)
         except Exception as exc:
             print(f"Editor failed: {exc}", file=sys.stderr)
             raise SystemExit(1) from exc
