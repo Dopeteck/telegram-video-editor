@@ -150,6 +150,24 @@ def validate_edit_plan(
     return EditPlan(title, tuple(non_overlapping), tuple(rejected))
 
 
+def load_broll_catalog(client, bucket: str, catalog_key: str) -> list[BrollAsset]:
+    """Load the user's cleared B-roll catalogue; a missing key means no B-roll yet."""
+    try:
+        response = client.get_object(Bucket=bucket, Key=catalog_key)
+    except Exception as exc:
+        error = getattr(exc, "response", {}) or {}
+        code = str(((error.get("Error") or {}).get("Code")) or "")
+        if code in {"NoSuchKey", "404", "NotFound"}:
+            return []
+        raise RuntimeError(f"Could not read B-roll catalogue '{catalog_key}': {exc}") from exc
+
+    try:
+        payload = json.loads(response["Body"].read().decode("utf-8"))
+    except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"B-roll catalogue '{catalog_key}' is not valid UTF-8 JSON.") from exc
+    return parse_catalog(payload)
+
+
 def transcribe_video(video_path: Path, model_size: str = "small") -> tuple[list[TranscriptSegment], str | None]:
     try:
         from faster_whisper import WhisperModel
@@ -182,6 +200,10 @@ def create_edit_plan(
 ) -> EditPlan:
     if not transcript:
         raise ValueError("Cannot plan an edit without transcript segments.")
+    # A missing/empty cleared-footage library is not a reason to fail an edit.
+    # The deterministic render still adds captions and preserves original audio.
+    if not assets:
+        return EditPlan("Edited clip", ())
     transcript_text = "\n".join(
         f"[{_timestamp(row.start)} - {_timestamp(row.end)}] {row.text}" for row in transcript
     )
@@ -388,12 +410,7 @@ def process_r2_clip(
 
         details = probe_video(clip_path)
         transcript, language = transcribe_video(clip_path, whisper_model)
-        try:
-            response = client.get_object(Bucket=bucket, Key=catalog_key)
-            raw_catalog = json.loads(response["Body"].read().decode("utf-8"))
-        except Exception as exc:
-            raise RuntimeError(f"Could not read B-roll catalogue '{catalog_key}': {exc}") from exc
-        assets = parse_catalog(raw_catalog)
+        assets = load_broll_catalog(client, bucket, catalog_key)
         plan = create_edit_plan(transcript, details["duration"], assets, model=model, ollama_url=ollama_url)
 
         broll_paths: dict[str, Path] = {}
