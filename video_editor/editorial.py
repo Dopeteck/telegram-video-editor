@@ -231,16 +231,19 @@ def detect_burned_in_captions(
             ).stdout
             if not frame:
                 continue
-            ocr = subprocess.run(
+            ocr_output = subprocess.run(
                 ["tesseract", "stdin", "stdout", "--psm", "6", "tsv"],
                 input=frame,
                 check=True,
                 capture_output=True,
-                text=True,
                 timeout=25,
             ).stdout
+            # Tesseract consumes the FFmpeg PNG frame as bytes and returns
+            # TSV bytes. Do not enable subprocess text mode for binary stdin.
+            if isinstance(ocr_output, bytes):
+                ocr_output = ocr_output.decode("utf-8", errors="replace")
             usable_samples += 1
-            rows = csv.DictReader(io.StringIO(ocr), delimiter="\t")
+            rows = csv.DictReader(io.StringIO(ocr_output), delimiter="\t")
             words: list[str] = []
             confidences: list[float] = []
             for row in rows:

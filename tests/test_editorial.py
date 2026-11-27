@@ -78,13 +78,16 @@ def test_caption_detection_fails_safe_when_too_few_frames_are_readable(monkeypat
     assert detect_burned_in_captions(Path("clip.mp4"), 90, sample_count=8) is None
 
 
-def test_caption_detection_returns_false_only_after_enough_successful_ocr_samples(monkeypatch):
+def test_caption_detection_passes_binary_frames_to_tesseract_without_text_mode(monkeypatch):
     monkeypatch.setattr("video_editor.editorial.shutil.which", lambda _: "/usr/bin/tesseract")
 
     def fake_run(command, **kwargs):
         if command[0] == "ffmpeg":
             return SimpleNamespace(stdout=b"frame")
-        return SimpleNamespace(stdout="level\\ttext\\n")
+        assert command[0] == "tesseract"
+        assert kwargs["input"] == b"frame"
+        assert kwargs.get("text") is not True
+        return SimpleNamespace(stdout=b"level\\ttext\\n")
 
     monkeypatch.setattr("video_editor.editorial.subprocess.run", fake_run)
     assert detect_burned_in_captions(Path("clip.mp4"), 90, sample_count=8) is False
