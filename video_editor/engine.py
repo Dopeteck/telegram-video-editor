@@ -51,10 +51,18 @@ Rules:
 
 
 @dataclass(frozen=True)
+class TranscriptWord:
+    start: float
+    end: float
+    text: str
+
+
+@dataclass(frozen=True)
 class TranscriptSegment:
     start: float
     end: float
     text: str
+    words: tuple[TranscriptWord, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -178,7 +186,7 @@ def validate_edit_plan(
 
     transcript_text = " ".join(segment.text for segment in (transcript or []))
     punch_ins, callouts, editorial_rejections = validate_editorial_cues(
-        payload, duration, transcript_text
+        payload, duration, transcript_text, transcript_segments=transcript
     )
     rejected.extend(editorial_rejections)
     return EditPlan(title, tuple(non_overlapping), punch_ins, callouts, tuple(rejected))
@@ -208,11 +216,28 @@ def transcribe_video(video_path: Path, model_size: str = "small") -> tuple[list[
     except ImportError as exc:
         raise RuntimeError("faster-whisper is not installed; install requirements.txt.") from exc
     model = WhisperModel(model_size, device="cpu", compute_type="int8")
-    segments, info = model.transcribe(str(video_path), vad_filter=True, beam_size=3)
-    transcript = [
-        TranscriptSegment(max(0.0, float(s.start)), max(float(s.start), float(s.end)), str(s.text or "").strip())
-        for s in segments if str(s.text or "").strip()
-    ]
+    segments, info = model.transcribe(
+        str(video_path), vad_filter=True, beam_size=3, word_timestamps=True
+    )
+    transcript: list[TranscriptSegment] = []
+    for segment in segments:
+        text = str(segment.text or "").strip()
+        if not text:
+            continue
+        segment_start = max(0.0, float(segment.start))
+        segment_end = max(segment_start, float(segment.end))
+        words: list[TranscriptWord] = []
+        for word in (getattr(segment, "words", None) or []):
+            word_text = str(getattr(word, "word", "") or "").strip()
+            word_start = getattr(word, "start", None)
+            word_end = getattr(word, "end", None)
+            if not word_text or word_start is None or word_end is None:
+                continue
+            start = max(segment_start, float(word_start))
+            end = min(segment_end, max(start, float(word_end)))
+            if end > start:
+                words.append(TranscriptWord(start, end, word_text))
+        transcript.append(TranscriptSegment(segment_start, segment_end, text, tuple(words)))
     if not transcript:
         raise RuntimeError("Whisper found no usable speech in the finished clip.")
     return transcript, getattr(info, "language", None)
