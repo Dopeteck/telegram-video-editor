@@ -24,7 +24,6 @@ def test_catalog_only_accepts_rights_verified_assets_with_source_and_license():
         {"id": "bad", "key": "broll/../outside.mp4", "description": "Bad path",
          "source_url": "https://example.com/source", "license": "Owned",
          "rights_verified": True},
-    ]})
         {"id": "../escape", "key": "broll/escape.mp4", "description": "Bad ID",
          "source_url": "https://example.com/source", "license": "Owned",
          "rights_verified": True},
