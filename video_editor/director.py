@@ -60,7 +60,15 @@ def _phrase_is_spoken_at(
     if spoken_window is None:
         return False
     spoken_start, spoken_end = spoken_window
-    return end >= spoken_start - 0.75 and start <= spoken_end + 0.75
+    # Do not let a graphic appear several seconds before its words are spoken
+    # or linger over an unrelated sentence. A one-second lead/lag allows the
+    # designed treatment to breathe without breaking transcript alignment.
+    return (
+        end > spoken_start
+        and start < spoken_end
+        and start >= spoken_start - 1.0
+        and end <= spoken_end + 1.0
+    )
 
 
 def validate_editorial_direction(
