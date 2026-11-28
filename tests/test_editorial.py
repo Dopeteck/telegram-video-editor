@@ -214,3 +214,12 @@ def test_automatic_punch_ins_are_limited_to_one_subtle_zoom():
     assert len(punch_ins) == 1
     assert punch_ins[0].zoom == 1.08
     assert len(rejected) == 2
+
+
+def test_caption_policy_never_generates_empty_captions_without_speech():
+    assert engine.resolve_caption_policy(
+        "auto", Path("music-only.mp4"), 30, has_transcript=False
+    ) == (False, "no_speech_detected_no_new_captions")
+    assert engine.resolve_caption_policy(
+        "force", Path("music-only.mp4"), 30, has_transcript=False
+    ) == (False, "no_speech_detected_no_new_captions")
