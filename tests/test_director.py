@@ -48,11 +48,11 @@ def test_editorial_direction_accepts_grounded_content_specific_graphics():
         },
         [
             {
-                "start": 2.5,
-                "end": 6.0,
+                "start": 4.0,
+                "end": 6.5,
                 "kind": "impact",
                 "headline": "keeping attention",
-                "detail": "The real problem",
+                "detail": "it is",
                 "reason": "Emphasise the central argument.",
             },
             {
@@ -104,8 +104,8 @@ def test_stat_graphic_must_be_grounded_in_a_spoken_number():
         {"content_type": "education", "visual_mode": "instructional"},
         [
             {
-                "start": 2.5,
-                "end": 6.0,
+                "start": 4.0,
+                "end": 6.2,
                 "kind": "stat",
                 "headline": "keeping attention",
             }
@@ -121,8 +121,8 @@ def test_editorial_direction_rejects_overlapping_graphics():
     _, graphics, rejected = validate_editorial_direction(
         {"content_type": "documentary", "visual_mode": "cinematic"},
         [
-            {"start": 2.5, "end": 5.0, "kind": "quote", "headline": "keeping attention"},
-            {"start": 4.5, "end": 7.0, "kind": "impact", "headline": "it is keeping"},
+            {"start": 4.0, "end": 6.2, "kind": "quote", "headline": "keeping attention"},
+            {"start": 4.5, "end": 6.5, "kind": "impact", "headline": "it is keeping"},
         ],
         duration=20.0,
         transcript_segments=_transcript(),
@@ -152,7 +152,7 @@ def test_engine_validates_and_preserves_adaptive_profile_and_graphics():
                     "end": 13.0,
                     "kind": "stat",
                     "headline": "35 percent",
-                    "detail": "increased conversion",
+                    "detail": "",
                     "reason": "Give the spoken result a designed visual moment.",
                 }
             ],
