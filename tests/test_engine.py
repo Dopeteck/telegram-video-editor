@@ -212,3 +212,32 @@ def test_broll_is_rejected_when_evidence_is_missing_or_out_of_time():
     )
     assert wrong_time.broll_cues == ()
     assert any("not spoken during" in reason for reason in wrong_time.rejected_cues)
+
+
+def test_broll_evidence_keeps_specific_topic_words_that_look_like_stopwords():
+    from video_editor.engine import TranscriptSegment
+
+    asset = BrollAsset(
+        asset_id="like-button",
+        key="broll/like-button.mp4",
+        description="Close-up of a social media like button being tapped",
+        tags=("like", "button", "social media"),
+        source_url="https://example.com/source",
+        license="Owned footage",
+        rights_verified=True,
+    )
+    plan = validate_edit_plan(
+        {
+            "title": "The like button",
+            "broll_cues": [{
+                "start": 10,
+                "end": 14,
+                "asset_id": "like-button",
+                "evidence": "the like button",
+            }],
+        },
+        duration=30,
+        assets=[asset],
+        transcript=[TranscriptSegment(9, 15, "The like button changed everything.")],
+    )
+    assert len(plan.broll_cues) == 1
