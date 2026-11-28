@@ -18,6 +18,7 @@ from typing import Any
 from .editorial import (
     CalloutCue,
     PunchInCue,
+    _find_timed_phrase,
     detect_burned_in_captions,
     validate_editorial_cues,
 )
@@ -41,8 +42,8 @@ Return JSON only:
   ]
 }
 Rules:
-- B-roll: use only supplied catalogue IDs; never invent an asset. At most 6 cues, 2–8 seconds each, non-overlapping. Do not add generic filler.
-- Punch-ins: choose at most 4 genuinely useful emphasis moments, 2–8 seconds each, zoom 1.05–1.18, with no overlap. Avoid random zooming.
+- B-roll: use only supplied catalogue IDs; never invent an asset. At most 2 cues, 2–8 seconds each, non-overlapping. Each cue MUST include an exact, contiguous transcript quote in "evidence". The quote must be spoken during that cue. Only select an asset when at least two distinctive words/concepts in the evidence also appear in its description or tags (or one highly distinctive 8+ character term). If the available footage does not clearly match, return no B-roll cue. Never use a merely mood-adjacent or generic shot.
+- Punch-ins: at most ONE subtle emphasis punch-in in the entire clip, 2–6 seconds, zoom 1.05–1.10. Prefer no punch-in over a decorative zoom. Do not use zooms to fill gaps or simulate camera movement.
 - Callouts: choose at most 3 high-value facts, numbers, or concepts. Text must be an exact contiguous phrase from the transcript, at most 34 characters, one line, 1.5–5 seconds, and non-overlapping. Do not paraphrase, add claims, or repeat ordinary dialogue.
 - A callout is a designed graphic emphasis, not a subtitle. Place it in the upper safe area; the renderer handles placement.
 - Do not propose subtitles. Existing burned-in subtitles are preserved; new captions are added only after a separate detection check.
@@ -82,6 +83,7 @@ class BrollCue:
     end: float
     asset_id: str
     reason: str
+    evidence: str = ""
 
 
 @dataclass(frozen=True)
@@ -134,13 +136,59 @@ def parse_catalog(payload: dict[str, Any]) -> list[BrollAsset]:
     return assets
 
 
+_BROLL_STOPWORDS = {
+    "about", "after", "again", "also", "another", "because", "been", "being",
+    "could", "does", "doing", "from", "have", "having", "into", "just", "like",
+    "made", "make", "many", "more", "most", "much", "only", "other", "over",
+    "same", "some", "such", "than", "that", "their", "them", "then", "there",
+    "these", "they", "this", "those", "through", "very", "were", "what", "when",
+    "where", "which", "while", "with", "would", "your", "people", "person",
+    "video", "footage", "image", "images", "clip", "shot", "scene", "visual",
+    "visuals", "generic", "background",
+}
+
+_BROLL_SYNONYM_GROUPS = (
+    {"phone", "phones", "smartphone", "smartphones", "mobile", "cellphone"},
+    {"car", "cars", "vehicle", "vehicles", "automobile", "automobiles", "traffic", "driving", "road", "roads"},
+    {"computer", "computers", "laptop", "laptops", "desktop", "desktops", "pc"},
+    {"internet", "online", "web", "website", "websites"},
+    {"money", "cash", "finance", "financial", "dollar", "dollars", "payment", "payments", "banking"},
+    {"court", "judge", "law", "lawsuit", "legal", "litigation", "trial"},
+    {"football", "soccer", "fifa", "goal", "goals"},
+)
+
+_BROLL_CANONICAL = {
+    term: f"concept_{index}"
+    for index, group in enumerate(_BROLL_SYNONYM_GROUPS)
+    for term in group
+}
+
+
+def _broll_concepts(value: str) -> set[str]:
+    tokens = {
+        token for token in re.findall(r"[a-z0-9]+", value.casefold())
+        if len(token) >= 3 and token not in _BROLL_STOPWORDS
+    }
+    return {_BROLL_CANONICAL.get(token, token) for token in tokens}
+
+
+def _broll_evidence_matches_asset(evidence: str, asset: BrollAsset) -> bool:
+    """Require concrete topic overlap before inserting a licensed visual."""
+    spoken = _broll_concepts(evidence)
+    metadata = _broll_concepts(" ".join((asset.description, *asset.tags)))
+    matches = spoken & metadata
+    # Two independent concepts are preferred; a single unusually specific
+    # word (e.g. a named platform or organisation) can also be a clear match.
+    return len(matches) >= 2 or any(len(term) >= 8 and not term.startswith("concept_") for term in matches)
+
+
 def validate_edit_plan(
     payload: dict[str, Any],
     duration: float,
     assets: list[BrollAsset],
     *,
     transcript: list[TranscriptSegment] | None = None,
-    max_cues: int = 6,
+    max_cues: int = 2,
     min_cue_seconds: float = 2.0,
     max_cue_seconds: float = 8.0,
 ) -> EditPlan:
@@ -151,6 +199,7 @@ def validate_edit_plan(
     if not isinstance(rows, list):
         raise ValueError("AI edit plan 'broll_cues' must be a list.")
     allowed = {asset.asset_id for asset in assets if asset.rights_verified}
+    assets_by_id = {asset.asset_id: asset for asset in assets if asset.rights_verified}
     accepted: list[BrollCue] = []
     rejected: list[str] = []
     for index, row in enumerate(rows):
@@ -175,7 +224,33 @@ def validate_edit_plan(
         if not min_cue_seconds <= end - start <= max_cue_seconds:
             rejected.append(f"cue {index + 1}: cutaway length is outside allowed limits")
             continue
-        accepted.append(BrollCue(start, end, asset_id, str(row.get("reason") or "Contextual cutaway")[:180]))
+
+        evidence = str(row.get("evidence") or "").strip()
+        if transcript is not None:
+            if not evidence:
+                rejected.append(f"cue {index + 1}: missing exact spoken evidence for B-roll relevance")
+                continue
+            spoken_window = _find_timed_phrase(evidence, transcript, near=start)
+            if spoken_window is None:
+                rejected.append(f"cue {index + 1}: evidence is not an exact phrase in the transcript")
+                continue
+            spoken_start, spoken_end = spoken_window
+            if end < spoken_start - 0.75 or start > spoken_end + 0.75:
+                rejected.append(f"cue {index + 1}: evidence is not spoken during the proposed B-roll cue")
+                continue
+            asset = assets_by_id[asset_id]
+            if not _broll_evidence_matches_asset(evidence, asset):
+                rejected.append(
+                    f"cue {index + 1}: transcript evidence does not match the asset description or tags"
+                )
+                continue
+        accepted.append(BrollCue(
+            start,
+            end,
+            asset_id,
+            str(row.get("reason") or "Contextual cutaway")[:180],
+            evidence,
+        ))
     accepted.sort(key=lambda cue: cue.start)
     non_overlapping: list[BrollCue] = []
     for cue in accepted:
@@ -271,8 +346,10 @@ def create_edit_plan(
         "transcript": transcript_text[:14000],
         "available_rights_cleared_broll": catalogue,
         "instruction": (
-            "Return editorial decisions for this clip. Even with an empty B-roll list, "
-            "consider restrained punch-ins and exact-transcript callouts. Do not invent facts."
+            "Return editorial decisions for this clip. Only propose B-roll when the asset's "
+            "description/tags clearly match the quoted words in that exact time window. "
+            "Provide an exact transcript 'evidence' quote for each B-roll cue. Do not invent "
+            "facts or visuals. Prefer zero B-roll and zero zooms over a weak or decorative edit."
         ),
     }
     body = {
@@ -491,18 +568,34 @@ def build_filter_complex(
         )
         current = output_label
 
-    # B-roll has priority over speaker zooms and is fitted to the whole canvas.
+    # Preserve the complete B-roll frame. Landscape/portrait mismatches use a
+    # blurred, darkened fill behind a contain-scaled foreground instead of
+    # enlarging and cropping away the actual subject.
     for index, cue in enumerate(cues, start=1):
         start, end = f"{cue.start:.3f}", f"{cue.end:.3f}"
         duration = f"{cue.end - cue.start:.3f}"
-        broll_label, output_label = f"broll{index}", f"v{index}"
+        bg_source, fg_source = f"brbgsrc{index}", f"brfgsrc{index}"
+        bg_label, fg_label = f"brbg{index}", f"brfg{index}"
+        frame_label, output_label = f"brframe{index}", f"v{index}"
         filters.append(
             f"[{index}:v]trim=duration={duration},setpts=PTS-STARTPTS+{start}/TB,"
-            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},setsar=1,format=yuv420p[{broll_label}]"
+            f"split=2[{bg_source}][{fg_source}]"
         )
         filters.append(
-            f"[{current}][{broll_label}]overlay=0:0:eof_action=pass:repeatlast=0:"
+            f"[{bg_source}]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},boxblur=24:2,eq=brightness=-0.30:saturation=0.75,"
+            f"setsar=1[{bg_label}]"
+        )
+        filters.append(
+            f"[{fg_source}]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"format=yuva420p,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black@0,"
+            f"setsar=1[{fg_label}]"
+        )
+        filters.append(
+            f"[{bg_label}][{fg_label}]overlay=0:0:eof_action=pass:repeatlast=0[{frame_label}]"
+        )
+        filters.append(
+            f"[{current}][{frame_label}]overlay=0:0:eof_action=pass:repeatlast=0:"
             f"enable='between(t,{start},{end})'[{output_label}]"
         )
         current = output_label
