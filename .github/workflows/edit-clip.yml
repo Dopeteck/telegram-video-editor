@@ -47,6 +47,7 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       AI_MODEL: qwen3:4b-instruct-2507-q4_K_M
+      AI_VISION_MODEL: qwen3-vl:2b
       OLLAMA_HOST: http://127.0.0.1:11434
     steps:
       - name: Validate input and R2 secrets
@@ -146,6 +147,8 @@ jobs:
           fi
           ollama pull "$AI_MODEL"
           ollama show "$AI_MODEL" >/dev/null
+          ollama pull "$AI_VISION_MODEL"
+          ollama show "$AI_VISION_MODEL" >/dev/null
 
       - name: Edit the completed clip
         id: edit
@@ -164,6 +167,7 @@ jobs:
             --whisper-model "$WHISPER_MODEL" \
             --caption-mode "$CAPTION_MODE" \
             --model "$AI_MODEL" \
+            --vision-model "$AI_VISION_MODEL" \
             --ollama-url "$OLLAMA_HOST"
 
       - name: Deliver edited output to Telegram
