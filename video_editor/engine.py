@@ -32,7 +32,7 @@ Return JSON only:
 {
   "title": "short editorial title",
   "broll_cues": [
-    {"start": 12.0, "end": 17.0, "asset_id": "exact-catalogue-id", "reason": "why this shot supports the point"}
+    {"start": 12.0, "end": 17.0, "asset_id": "exact-catalogue-id", "evidence": "exact spoken words at this time", "reason": "why this shot supports those words"}
   ],
   "punch_ins": [
     {"start": 21.0, "end": 25.0, "zoom": 1.10, "reason": "specific moment of emphasis"}
