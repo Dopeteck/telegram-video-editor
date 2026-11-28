@@ -705,14 +705,15 @@ def build_filter_complex(
             title_size = int(title_size * 1.08)
         available_width = max(80, panel_w - int(width * 0.16))
         title_size = min(title_size, int(available_width / (max(1, len(cue.headline)) * 0.58)))
-        title_size = max(22, min(int(height * 0.075), title_size))
-        detail_size = max(18, min(34, int(height * 0.026)))
+        title_size = max(12, min(int(height * 0.075), title_size))
+        detail_size = max(12, min(34, int(height * 0.026)))
         if cue.detail:
             detail_size = min(detail_size, int(available_width / (max(1, len(cue.detail)) * 0.56)))
-            detail_size = max(18, detail_size)
+            detail_size = max(12, detail_size)
         title = _escape_drawtext(cue.headline.upper() if cue.kind in {"impact", "stat"} else cue.headline)
         detail = _escape_drawtext(cue.detail) if cue.detail else ""
         enable = f"between(t,{cue.start:.3f},{cue.end:.3f})"
+        alpha_expr = f"max(0\\,min(1\\,(t-{cue.start:.3f})/0.18))"
         box_label = f"graphicbox{index}"
         accent_label = f"graphicbar{index}"
         title_label = f"graphictitle{index}"
@@ -749,16 +750,16 @@ def build_filter_complex(
         title_colour = accent if cue.kind == "stat" else "white"
         filters.append(
             f"[{accent_label}]drawtext=font='Liberation Sans':text='{title}':"
-            f"fontcolor={title_colour}:fontsize={title_size}:borderw=2:bordercolor=black@0.7:"
+            f"fontcolor={title_colour}:alpha='{alpha_expr}':fontsize={title_size}:borderw=2:bordercolor=black@0.7:"
             f"x={title_x_expr}:y={title_y}:enable='{enable}'[{title_label}]"
         )
         current = title_label
         if detail:
             detail_label = f"graphicdetail{index}"
-            detail_y = panel_y + int(height * 0.112)
+            detail_y = panel_y + int(height * (0.16 if cue.kind == "step" else 0.112))
             filters.append(
                 f"[{current}]drawtext=font='Liberation Sans':text='{detail}':"
-                f"fontcolor={accent}:fontsize={detail_size}:borderw=1:bordercolor=black@0.65:"
+                f"fontcolor={accent}:alpha='{alpha_expr}':fontsize={detail_size}:borderw=1:bordercolor=black@0.65:"
                 f"x={title_x_expr}:y={detail_y}:enable='{enable}'[{detail_label}]"
             )
             current = detail_label
