@@ -364,7 +364,12 @@ def analyze_video(
         scene_changes = ()
         warnings.append(str(exc)[:500])
     frame_timestamps = choose_frame_timestamps(duration, scene_changes, max_frames=max_frames)
-    images, faces = _extract_samples_and_faces(video_path, duration, frame_timestamps)
+    try:
+        images, faces = _extract_samples_and_faces(video_path, duration, frame_timestamps)
+    except Exception as exc:
+        # Preserve the transcript-based edit if optional local visual sampling fails.
+        images, faces = [], ()
+        warnings.append(str(exc)[:500])
     try:
         frames = describe_frames_with_ollama(
             images, model=model, ollama_url=ollama_url, timeout_seconds=timeout_seconds
