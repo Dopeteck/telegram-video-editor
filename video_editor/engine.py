@@ -565,7 +565,7 @@ def build_filter_complex(
         filters.append(
             f"[{zoom_source}]scale={zoom_width}:{zoom_height}:flags=lanczos,"
             f"crop={width}:{height}:x='min(max(0\\,{cue.focus_x:.4f}*iw-ow/2)\\,iw-ow)':"
-            f"y='min(max(0\\,{cue.focus_y:.4f}*ih-oh*0.42)\\,ih-oh)',format=yuva420p,"
+            f"y='min(max(0\\,{cue.focus_y:.4f}*ih-oh/2)\\,ih-oh)',format=yuva420p,"
             f"fade=t=in:st={start}:d=0.22:alpha=1,"
             f"fade=t=out:st={fade_out_start:.3f}:d=0.22:alpha=1[{zoom_label}]"
         )
