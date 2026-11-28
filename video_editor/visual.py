@@ -94,7 +94,7 @@ def parse_scene_times(log_text: str, duration: float, *, min_gap: float = 1.25) 
     """Parse FFmpeg showinfo timestamps emitted by the scene select filter."""
     raw = [
         float(value)
-        for value in re.findall(r"pts_time:([0-9]+(?:\\.[0-9]+)?)", log_text)
+        for value in re.findall(r"pts_time:([0-9]+(?:[.][0-9]+)?)", log_text)
     ]
     accepted: list[float] = []
     for timestamp in sorted(raw):
