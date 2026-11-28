@@ -60,7 +60,7 @@ def test_editorial_direction_accepts_grounded_content_specific_graphics():
                 "end": 13.0,
                 "kind": "stat",
                 "headline": "35 percent",
-                "detail": "increased conversion",
+                "detail": "",
                 "reason": "Make the measurable result instantly legible.",
             },
         ],
