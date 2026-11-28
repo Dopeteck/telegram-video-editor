@@ -132,3 +132,23 @@ def test_frame_extraction_uses_opencv_on_a_real_synthetic_video(tmp_path):
     assert [round(item["timestamp"], 1) for item in images] == [0.5, 1.5]
     assert all(base64.b64decode(item["image"]) for item in images)
     assert isinstance(faces, tuple)
+
+
+def test_visual_analysis_preserves_edit_when_opencv_sampling_fails(monkeypatch, tmp_path):
+    import video_editor.visual as visual
+
+    monkeypatch.setattr(visual, "detect_scene_changes", lambda *args, **kwargs: (2.0,))
+
+    def fail_sampling(*args, **kwargs):
+        raise RuntimeError("synthetic OpenCV decode failure")
+
+    monkeypatch.setattr(visual, "_extract_samples_and_faces", fail_sampling)
+    result = visual.analyze_video(
+        tmp_path / "input.mp4",
+        10.0,
+        model="qwen3-vl:2b",
+        ollama_url="http://127.0.0.1:11434",
+    )
+    assert result.vision_status == "no_frames"
+    assert result.faces == ()
+    assert any("synthetic OpenCV decode failure" in warning for warning in result.warnings)
