@@ -92,3 +92,43 @@ def test_visual_analysis_manifest_and_planner_context_are_compact():
     )
     assert analysis.to_dict()["vision_model"] == "qwen3-vl:2b"
     assert analysis.planner_context()["face_positions"][0]["center_x"] == 0.4
+
+
+def test_face_aware_zoom_uses_detected_focal_point_in_ffmpeg_crop():
+    from video_editor.engine import build_filter_complex
+
+    graph = build_filter_complex(
+        [],
+        1080,
+        1920,
+        punch_ins=[PunchInCue(2, 5, 1.08, "Keep speaker in view", 0.35, 0.40)],
+        include_captions=False,
+    )
+    assert "0.3500*iw-ow/2" in graph
+    assert "0.4000*ih-oh*0.42" in graph
+
+
+def test_frame_extraction_uses_opencv_on_a_real_synthetic_video(tmp_path):
+    import base64
+    import shutil
+    import subprocess
+
+    import pytest
+    from video_editor.visual import _extract_samples_and_faces
+
+    if not shutil.which("ffmpeg"):
+        pytest.skip("FFmpeg is not installed")
+    video = tmp_path / "visual-sample.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=360x640:rate=12:duration=3",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", str(video),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    images, faces = _extract_samples_and_faces(video, 3.0, [0.5, 1.5])
+    assert [round(item["timestamp"], 1) for item in images] == [0.5, 1.5]
+    assert all(base64.b64decode(item["image"]) for item in images)
+    assert isinstance(faces, tuple)
