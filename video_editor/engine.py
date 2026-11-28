@@ -279,7 +279,8 @@ def validate_edit_plan(
 
     transcript_text = " ".join(segment.text for segment in (transcript or []))
     punch_ins, callouts, editorial_rejections = validate_editorial_cues(
-        payload, duration, transcript_text, transcript_segments=transcript
+        payload, duration, transcript_text, transcript_segments=transcript,
+        max_callouts=2,
     )
     rejected.extend(editorial_rejections)
     editorial_profile, graphic_cues, direction_rejections = validate_editorial_direction(
