@@ -31,6 +31,7 @@ def main() -> None:
     process.add_argument("--catalog-key", default="broll/catalog.json")
     process.add_argument("--output-prefix", default="edited")
     process.add_argument("--model", default="qwen3:4b-instruct-2507-q4_K_M")
+    process.add_argument("--vision-model", default="qwen3-vl:2b")
     process.add_argument("--whisper-model", default="small")
     process.add_argument("--caption-mode", choices=("auto", "preserve", "force"), default="auto")
     process.add_argument("--ollama-url", default="http://127.0.0.1:11434")
@@ -42,7 +43,7 @@ def main() -> None:
                 args.clip_key, args.job_id, catalog_key=args.catalog_key,
                 output_prefix=args.output_prefix, model=args.model,
                 whisper_model=args.whisper_model, ollama_url=args.ollama_url,
-                caption_mode=args.caption_mode,
+                caption_mode=args.caption_mode, vision_model=args.vision_model,
             )
             _write_github_outputs(result)
         except Exception as exc:
