@@ -350,8 +350,8 @@ def transcribe_video(video_path: Path, model_size: str = "small") -> tuple[list[
             if end > start:
                 words.append(TranscriptWord(start, end, word_text))
         transcript.append(TranscriptSegment(segment_start, segment_end, text, tuple(words)))
-    if not transcript:
-        raise RuntimeError("Whisper found no usable speech in the finished clip.")
+    # A clip without dialogue is still valid editing input: gameplay, sports,
+    # music, scenic footage and silent tutorials can be directed visually.
     return transcript, getattr(info, "language", None)
 
 
@@ -370,8 +370,8 @@ def create_edit_plan(
     timeout_seconds: int = 300,
     visual_context: dict[str, Any] | None = None,
 ) -> EditPlan:
-    if not transcript:
-        raise ValueError("Cannot plan an edit without transcript segments.")
+    if not transcript and visual_context is None:
+        raise ValueError("A visual analysis is required when no transcript is available.")
     transcript_text = "\n".join(
         f"[{_timestamp(row.start)} - {_timestamp(row.end)}] {row.text}" for row in transcript
     )
@@ -384,6 +384,7 @@ def create_edit_plan(
         "transcript": transcript_text[:14000],
         "available_rights_cleared_broll": catalogue,
         "visual_analysis": visual_context or {},
+        "speech_available": bool(transcript),
         "instruction": (
             "Return editorial decisions for this clip. Only propose B-roll when the asset's "
             "description/tags clearly match the quoted words in that exact time window. "
@@ -391,6 +392,13 @@ def create_edit_plan(
             "facts or visuals. Use visual frame descriptions and scene changes to understand "
             "what is already on screen and avoid redundant or contradictory inserts. "
             "Prefer zero B-roll and zero zooms over a weak or decorative edit."
+            + (
+                " This clip has no usable speech: do not create captions, callouts, quotes, "
+                "statistics or transcript-grounded B-roll. Base the content profile and any "
+                "visual-only emphasis on the sampled frames and scene changes. Do not invent "
+                "dialogue or on-screen text."
+                if not transcript else ""
+            )
         ),
     }
     body = {
@@ -436,12 +444,20 @@ def probe_video(path: Path) -> dict[str, Any]:
     }
 
 
-def resolve_caption_policy(mode: str, video_path: Path, duration: float) -> tuple[bool, str]:
-    """Decide whether to add captions, failing safe when existing text is uncertain."""
+def resolve_caption_policy(
+    mode: str,
+    video_path: Path,
+    duration: float,
+    *,
+    has_transcript: bool = True,
+) -> tuple[bool, str]:
+    """Decide whether to add captions, failing safe when source text is uncertain."""
     if mode not in {"auto", "preserve", "force"}:
         raise ValueError("caption_mode must be one of: auto, preserve, force.")
     if mode == "preserve":
         return False, "preserve_source_captions"
+    if not has_transcript:
+        return False, "no_speech_detected_no_new_captions"
     if mode == "force":
         return True, "forced_new_captions"
     detected = detect_burned_in_captions(video_path, duration)
@@ -884,7 +900,10 @@ def process_r2_clip(
             raise RuntimeError(f"R2 download was empty: {clip_key}")
 
         details = probe_video(clip_path)
-        transcript, language = transcribe_video(clip_path, whisper_model)
+        if details["has_audio"]:
+            transcript, language = transcribe_video(clip_path, whisper_model)
+        else:
+            transcript, language = [], None
         assets = load_broll_catalog(client, bucket, catalog_key)
         visual_analysis = analyze_video(
             clip_path, details["duration"], model=vision_model, ollama_url=ollama_url
@@ -911,7 +930,8 @@ def process_r2_clip(
             broll_paths[asset.asset_id] = path
 
         add_captions, caption_decision = resolve_caption_policy(
-            caption_mode, clip_path, details["duration"]
+            caption_mode, clip_path, details["duration"],
+            has_transcript=bool(transcript),
         )
         output_name = f"{clip_path.stem}.edited.mp4"
         output_path = workdir / "output" / output_name
