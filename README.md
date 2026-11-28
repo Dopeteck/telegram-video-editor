@@ -11,7 +11,7 @@ A **separate post-processing system** for finished clips produced by Chopify. It
 - Transcribes the short clip locally with Faster-Whisper (no paid transcription API).
 - Uses local Ollama model `qwen3:4b-instruct-2507-q4_K_M` to plan edits even when the B-roll library is empty.
 - Selects B-roll **only** from an asset catalogue whose entries record a source, licence, and `rights_verified: true`.
-- Adds restrained, timed speaker punch-ins and designed callout graphics. Callout text must be an exact phrase from the transcript.
+- Uses B-roll only when its catalogue description/tags match at least two distinctive concepts in an exact, time-aligned transcript quote. Landscape footage is shown in full over a blurred background instead of being center-cropped. Automatic zooms are limited to one subtle emphasis move; a weak visual cue is rejected.
 - Detects likely burned-in subtitles with Tesseract OCR. In `auto` mode it preserves existing captions and adds new ones only when no existing text is detected; uncertain OCR fails safe and preserves the source.
 - When captions are needed, uses Faster-Whisper word timestamps to render short karaoke-style caption beats with an active-word highlight and safe frame margins. It also normalises dialogue loudness and uploads a separate MP4 plus an edit-plan JSON manifest.
 - Delivers the edited result into Telegram automatically when Telegram secrets are configured.
@@ -66,7 +66,7 @@ The R2 workflow is manual-only. No clip-processing run is started by a push or p
 
 ## Quality roadmap
 
-1. **Current branch work:** AI planning without requiring B-roll, controlled emphasis zooms, transcript-grounded callout graphics, subtitle detection/preservation, safe caption wrapping, and dialogue loudness normalisation.
+1. **Current quality pass:** evidence-backed B-roll selection, full-frame B-roll composition with a blurred fill, fewer automatic punch-ins, transcript-grounded callout graphics, subtitle detection/preservation, safe caption wrapping, and dialogue loudness normalisation.
 2. **Next visual pass:** face-aware portrait reframing, scene-aware cut timing, smoother transitions, and a preview/approval step.
 3. Curated rights-cleared B-roll and optional licensed sound effects/music.
 4. Review UX: compare original and edited versions, approve/reject before publishing.
