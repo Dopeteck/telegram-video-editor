@@ -122,7 +122,7 @@ def test_editorial_direction_rejects_overlapping_graphics():
         {"content_type": "documentary", "visual_mode": "cinematic"},
         [
             {"start": 2.5, "end": 5.0, "kind": "quote", "headline": "keeping attention"},
-            {"start": 4.5, "end": 7.0, "kind": "impact", "headline": "The real problem"},
+            {"start": 4.5, "end": 7.0, "kind": "impact", "headline": "it is keeping"},
         ],
         duration=20.0,
         transcript_segments=_transcript(),
