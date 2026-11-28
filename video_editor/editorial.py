@@ -18,6 +18,9 @@ class PunchInCue:
     end: float
     zoom: float
     reason: str
+    # Normalised source-frame focal point, populated by local face tracking.
+    focus_x: float = 0.5
+    focus_y: float = 0.5
 
 
 @dataclass(frozen=True)
