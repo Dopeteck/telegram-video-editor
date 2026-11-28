@@ -22,12 +22,13 @@ from .editorial import (
     detect_burned_in_captions,
     validate_editorial_cues,
 )
+from .visual import analyze_video, apply_face_focus
 
 SUPPORTED_VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm"}
 SYSTEM_PROMPT = """You are a senior short-form documentary editor, not a caption generator.
 Create a restrained but noticeable editorial plan for the supplied finished clip.
 Make useful decisions even when the B-roll catalogue is empty.
-Use the transcript timestamps to choose the strongest moments; never invent facts.
+Use the transcript timestamps and inspected video frames to choose the strongest moments; never invent facts. Treat visual descriptions as observations, not assumptions.
 Return JSON only:
 {
   "title": "short editorial title",
@@ -332,6 +333,7 @@ def create_edit_plan(
     model: str = "qwen3:4b-instruct-2507-q4_K_M",
     ollama_url: str = "http://127.0.0.1:11434",
     timeout_seconds: int = 300,
+    visual_context: dict[str, Any] | None = None,
 ) -> EditPlan:
     if not transcript:
         raise ValueError("Cannot plan an edit without transcript segments.")
@@ -346,15 +348,18 @@ def create_edit_plan(
         "clip_duration_seconds": round(duration, 2),
         "transcript": transcript_text[:14000],
         "available_rights_cleared_broll": catalogue,
+        "visual_analysis": visual_context or {},
         "instruction": (
             "Return editorial decisions for this clip. Only propose B-roll when the asset's "
             "description/tags clearly match the quoted words in that exact time window. "
             "Provide an exact transcript 'evidence' quote for each B-roll cue. Do not invent "
-            "facts or visuals. Prefer zero B-roll and zero zooms over a weak or decorative edit."
+            "facts or visuals. Use visual frame descriptions and scene changes to understand "
+            "what is already on screen and avoid redundant or contradictory inserts. "
+            "Prefer zero B-roll and zero zooms over a weak or decorative edit."
         ),
     }
     body = {
-        "model": model, "stream": False, "format": "json",
+        "model": model, "stream": False, "format": "json", "keep_alive": 0,
         "options": {"temperature": 0.15, "num_ctx": 8192, "num_predict": 1100},
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -559,7 +564,8 @@ def build_filter_complex(
         filters.append(f"[{current}]split=2[{base_label}][{zoom_source}]")
         filters.append(
             f"[{zoom_source}]scale={zoom_width}:{zoom_height}:flags=lanczos,"
-            f"crop={width}:{height}:(iw-ow)/2:(ih-oh)/2,format=yuva420p,"
+            f"crop={width}:{height}:x='min(max(0\\,{cue.focus_x:.4f}*iw-ow/2)\\,iw-ow)':"
+            f"y='min(max(0\\,{cue.focus_y:.4f}*ih-oh*0.42)\\,ih-oh)',format=yuva420p,"
             f"fade=t=in:st={start}:d=0.22:alpha=1,"
             f"fade=t=out:st={fade_out_start:.3f}:d=0.22:alpha=1[{zoom_label}]"
         )
@@ -704,6 +710,7 @@ def process_r2_clip(
     whisper_model: str = "small",
     ollama_url: str = "http://127.0.0.1:11434",
     caption_mode: str = "auto",
+    vision_model: str = "qwen3-vl:2b",
 ) -> dict[str, Any]:
     clip_key = clip_key.strip()
     if not clip_key or clip_key.startswith("/") or ".." in clip_key.split("/"):
@@ -734,7 +741,18 @@ def process_r2_clip(
         details = probe_video(clip_path)
         transcript, language = transcribe_video(clip_path, whisper_model)
         assets = load_broll_catalog(client, bucket, catalog_key)
-        plan = create_edit_plan(transcript, details["duration"], assets, model=model, ollama_url=ollama_url)
+        visual_analysis = analyze_video(
+            clip_path, details["duration"], model=vision_model, ollama_url=ollama_url
+        )
+        plan = create_edit_plan(
+            transcript, details["duration"], assets, model=model, ollama_url=ollama_url,
+            visual_context=visual_analysis.planner_context(),
+        )
+        plan = EditPlan(
+            plan.title, plan.broll_cues,
+            apply_face_focus(plan.punch_ins, visual_analysis.faces),
+            plan.callouts, plan.rejected_cues,
+        )
 
         broll_paths: dict[str, Path] = {}
         for cue in plan.broll_cues:
@@ -764,7 +782,9 @@ def process_r2_clip(
         manifest = {
             "source_key": clip_key, "output_key": output_key,
             "duration_seconds": round(details["duration"], 3), "language": language,
-            "model": model, "whisper_model": whisper_model, "title": plan.title,
+            "model": model, "vision_model": vision_model,
+            "visual_analysis": visual_analysis.to_dict(),
+            "whisper_model": whisper_model, "title": plan.title,
             "caption_mode": caption_mode, "caption_decision": caption_decision,
             "broll_cues": [asdict(cue) for cue in plan.broll_cues],
             "punch_ins": [asdict(cue) for cue in plan.punch_ins],
@@ -789,5 +809,9 @@ def process_r2_clip(
             "title": plan.title, "broll_count": len(plan.broll_cues),
             "punch_in_count": len(plan.punch_ins), "callout_count": len(plan.callouts),
             "caption_decision": caption_decision,
+            "visual_status": visual_analysis.vision_status,
+            "visual_frames_count": len(visual_analysis.frames),
+            "face_observations_count": len(visual_analysis.faces),
+            "scene_changes_count": len(visual_analysis.scene_changes),
             "duration_seconds": round(details["duration"], 3),
         }
