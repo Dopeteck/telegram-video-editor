@@ -29,8 +29,8 @@ If the B-roll catalogue is missing or empty, the local AI planner still chooses 
 5. The local vision model inspects sampled frames, while FFmpeg detects scene changes and OpenCV samples face positions. The Editorial Director combines the transcript and visual observations to choose a content profile, visual mode and energy level.
 6. The director may propose contextual B-roll, a restrained face-aware punch-in, simple exact-phrase callouts, and designed impact/stat/quote/step graphics. Deterministic validation rejects unsafe timestamps, invented B-roll IDs, unspoken graphic text, mistimed phrases and overlapping graphics.
 7. The renderer checks for source subtitles before adding any new captions, applies the selected visual treatments, and normalises dialogue loudness.
-7. If Telegram secrets are configured, the editor sends the MP4 to your Telegram chat. Files within 49 MB are sent as native Telegram videos. Larger files arrive as a private download button with a 24-hour signed R2 URL.
-8. The original clip remains unchanged.
+8. If Telegram secrets are configured, the editor sends the MP4 to your Telegram chat. Files within 49 MB are sent as native Telegram videos. Larger files arrive as a private download button with a 24-hour signed R2 URL.
+9. The original clip remains unchanged.
 
 ## Repository secrets
 
