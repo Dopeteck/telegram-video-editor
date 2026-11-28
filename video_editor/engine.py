@@ -138,11 +138,12 @@ def parse_catalog(payload: dict[str, Any]) -> list[BrollAsset]:
 
 _BROLL_STOPWORDS = {
     "about", "after", "again", "also", "another", "because", "been", "being",
-    "could", "does", "doing", "from", "have", "having", "into", "just", "like",
+    "could", "does", "doing", "from", "have", "having", "into", "just",
     "made", "make", "many", "more", "most", "much", "only", "other", "over",
     "same", "some", "such", "than", "that", "their", "them", "then", "there",
     "these", "they", "this", "those", "through", "very", "were", "what", "when",
-    "where", "which", "while", "with", "would", "your", "people", "person",
+    "where", "which", "while", "with", "would", "your", "the", "and", "for", "are",
+    "was", "were", "has", "had", "its", "not", "you", "he", "she", "we", "our", "they", "it", "can", "people", "person",
     "video", "footage", "image", "images", "clip", "shot", "scene", "visual",
     "visuals", "generic", "background",
 }
