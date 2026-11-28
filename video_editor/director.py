@@ -45,7 +45,7 @@ class GraphicCue:
 
 
 def _clean(value: Any, limit: int) -> str:
-    return re.sub(r"\\s+", " ", str(value or "")).strip()[:limit]
+    return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
 
 
 def _phrase_is_spoken_at(
@@ -126,7 +126,7 @@ def validate_editorial_direction(
         if not 1.6 <= end - start <= 4.5:
             rejected.append(f"graphic {index + 1}: duration must be 1.6–4.5 seconds")
             continue
-        if not headline or "\\n" in headline or "\\r" in headline:
+        if not headline or "\n" in headline or "\r" in headline:
             rejected.append(f"graphic {index + 1}: headline must be a non-empty single line")
             continue
         if not _phrase_is_spoken_at(headline, transcript_segments, start, end):
@@ -135,7 +135,7 @@ def validate_editorial_direction(
         if detail and not _phrase_is_spoken_at(detail, transcript_segments, start, end):
             rejected.append(f"graphic {index + 1}: detail is not an exact phrase spoken at this time")
             continue
-        if kind == "stat" and not re.search(r"(?:\\d|[$€£₦%])", headline):
+        if kind == "stat" and not re.search(r"(?:\d|[$€£₦%])", headline):
             rejected.append(f"graphic {index + 1}: stat headline must contain a spoken number or symbol")
             continue
         accepted.append(GraphicCue(
