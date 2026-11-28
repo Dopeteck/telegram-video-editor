@@ -105,7 +105,7 @@ def test_face_aware_zoom_uses_detected_focal_point_in_ffmpeg_crop():
         include_captions=False,
     )
     assert "0.3500*iw-ow/2" in graph
-    assert "0.4000*ih-oh*0.42" in graph
+    assert "0.4000*ih-oh/2" in graph
 
 
 def test_frame_extraction_uses_opencv_on_a_real_synthetic_video(tmp_path):
