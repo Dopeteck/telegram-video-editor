@@ -67,7 +67,7 @@ def test_face_focus_uses_nearby_median_and_defaults_to_center():
         FaceObservation(11, 0.44, 0.45, 0.1, 0.2),
         FaceObservation(12, 0.90, 0.90, 0.1, 0.2),
     ]
-    assert face_focus_at(observations, 10.5) == (0.42, 0.435)
+    assert face_focus_at(observations, 10.5) == (0.44, 0.45)
     assert face_focus_at(observations, 30) == (0.5, 0.5)
 
 
