@@ -26,7 +26,7 @@ from .visual import analyze_video, apply_face_focus
 from .director import EditorialProfile, GraphicCue, validate_editorial_direction
 
 SUPPORTED_VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm"}
-SYSTEM_PROMPT = """You are a senior short-form documentary editor, not a caption generator.
+SYSTEM_PROMPT = """You are a senior cross-genre short-form video editor, not a caption generator.
 Create a restrained but noticeable editorial plan for the supplied finished clip.
 Make useful decisions even when the B-roll catalogue is empty.
 Use the transcript timestamps and inspected video frames to choose the strongest moments; never invent facts. Treat visual descriptions as observations, not assumptions.
