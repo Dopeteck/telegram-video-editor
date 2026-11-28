@@ -18,7 +18,7 @@ A **separate post-processing system** for finished clips produced by Chopify. It
 - When captions are needed, uses Faster-Whisper word timestamps to render short karaoke-style caption beats with an active-word highlight and safe frame margins. It also normalises dialogue loudness and uploads a separate MP4 plus an edit-plan JSON manifest.
 - Delivers the edited result into Telegram automatically when Telegram secrets are configured.
 
-If the B-roll catalogue is missing or empty, the local AI planner still chooses useful punch-ins and transcript-grounded callouts. It does not invent footage or download random stock video. In the manual workflow, `caption_mode` defaults to `auto`; `preserve` never adds subtitles, and `force` is only for a source known to have no burned-in captions.
+If the B-roll catalogue is missing or empty, the local AI planner can still choose a content profile, designed transcript-grounded graphics, useful punch-ins and callouts. It does not invent footage or download random stock video. In the manual workflow, `caption_mode` defaults to `auto`; `preserve` never adds subtitles, and `force` is only for a source known to have no burned-in captions.
 
 ## Workflow
 
