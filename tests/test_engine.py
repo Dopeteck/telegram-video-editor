@@ -300,7 +300,7 @@ def test_speechless_clip_can_receive_visual_only_edit_plan(monkeypatch):
 
 def test_transcription_returns_empty_result_for_speechless_video(monkeypatch, tmp_path):
     import sys
-    from types import SimpleNamespace
+    from types import ModuleType, SimpleNamespace
 
     import video_editor.engine as engine
 
@@ -311,11 +311,9 @@ def test_transcription_returns_empty_result_for_speechless_video(monkeypatch, tm
         def transcribe(self, *args, **kwargs):
             return iter(()), SimpleNamespace(language=None)
 
-    monkeypatch.setitem(
-        sys.modules,
-        "faster_whisper",
-        SimpleNamespace(WhisperModel=FakeWhisperModel),
-    )
+    fake_whisper = ModuleType("faster_whisper")
+    fake_whisper.WhisperModel = FakeWhisperModel
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_whisper)
     transcript, language = engine.transcribe_video(tmp_path / "music-only.mp4")
     assert transcript == []
     assert language is None
