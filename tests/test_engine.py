@@ -103,3 +103,141 @@ def test_empty_broll_library_still_gets_an_ai_editorial_plan(monkeypatch):
     assert plan.broll_cues == ()
     assert len(plan.punch_ins) == 1
     assert plan.callouts[0].text == "$1.6 trillion"
+
+
+def test_broll_requires_transcript_evidence_and_matching_asset_metadata():
+    from video_editor.engine import TranscriptSegment, TranscriptWord
+
+    asset = BrollAsset(
+        asset_id="social-feed",
+        key="broll/social-feed.mp4",
+        description="A person scrolling a social media feed on a phone",
+        tags=("social", "media", "phone", "feed"),
+        source_url="https://example.com/source",
+        license="Owned footage",
+        rights_verified=True,
+    )
+    transcript = [
+        TranscriptSegment(
+            10.0,
+            16.0,
+            "People scroll social media feeds every day.",
+            (
+                TranscriptWord(10.0, 10.3, "People"),
+                TranscriptWord(10.3, 10.8, "scroll"),
+                TranscriptWord(10.8, 11.2, "social"),
+                TranscriptWord(11.2, 11.7, "media"),
+                TranscriptWord(11.7, 12.2, "feeds"),
+                TranscriptWord(12.2, 12.5, "every"),
+                TranscriptWord(12.5, 13.0, "day."),
+            ),
+        )
+    ]
+    plan = validate_edit_plan(
+        {
+            "title": "Social media habits",
+            "broll_cues": [{
+                "start": 10.5,
+                "end": 14.0,
+                "asset_id": "social-feed",
+                "evidence": "social media feeds",
+                "reason": "Show the exact subject being discussed",
+            }],
+        },
+        duration=30,
+        assets=[asset],
+        transcript=transcript,
+    )
+    assert len(plan.broll_cues) == 1
+    assert plan.broll_cues[0].evidence == "social media feeds"
+
+    mismatched = validate_edit_plan(
+        {
+            "title": "Social media habits",
+            "broll_cues": [{
+                "start": 10.5,
+                "end": 14.0,
+                "asset_id": "social-feed",
+                "evidence": "the weather is changing",
+            }],
+        },
+        duration=30,
+        assets=[asset],
+        transcript=transcript,
+    )
+    assert mismatched.broll_cues == ()
+    assert any("exact phrase" in reason for reason in mismatched.rejected_cues)
+
+
+def test_broll_is_rejected_when_spoken_topic_does_not_match_asset_tags():
+    from video_editor.engine import TranscriptSegment
+
+    plan = validate_edit_plan(
+        {
+            "title": "Social media habits",
+            "broll_cues": [{
+                "start": 10.5,
+                "end": 14.0,
+                "asset_id": "city",
+                "evidence": "social media feeds",
+            }],
+        },
+        duration=30,
+        assets=[_asset()],
+        transcript=[TranscriptSegment(10.0, 16.0, "People scroll social media feeds every day.")],
+    )
+    assert plan.broll_cues == ()
+    assert any("does not match the asset description or tags" in reason for reason in plan.rejected_cues)
+
+
+def test_broll_is_rejected_when_evidence_is_missing_or_out_of_time():
+    from video_editor.engine import TranscriptSegment
+
+    missing_evidence = validate_edit_plan(
+        {"title": "Test", "broll_cues": [{"start": 1, "end": 4, "asset_id": "city"}]},
+        duration=30,
+        assets=[_asset()],
+        transcript=[TranscriptSegment(10, 16, "A city street is busy with traffic.")],
+    )
+    assert missing_evidence.broll_cues == ()
+    assert any("missing exact spoken evidence" in reason for reason in missing_evidence.rejected_cues)
+
+    wrong_time = validate_edit_plan(
+        {"title": "Test", "broll_cues": [{
+            "start": 1, "end": 4, "asset_id": "city", "evidence": "city street",
+        }]},
+        duration=30,
+        assets=[_asset()],
+        transcript=[TranscriptSegment(10, 16, "A city street is busy with traffic.")],
+    )
+    assert wrong_time.broll_cues == ()
+    assert any("not spoken during" in reason for reason in wrong_time.rejected_cues)
+
+
+def test_broll_evidence_keeps_specific_topic_words_that_look_like_stopwords():
+    from video_editor.engine import TranscriptSegment
+
+    asset = BrollAsset(
+        asset_id="like-button",
+        key="broll/like-button.mp4",
+        description="Close-up of a social media like button being tapped",
+        tags=("like", "button", "social media"),
+        source_url="https://example.com/source",
+        license="Owned footage",
+        rights_verified=True,
+    )
+    plan = validate_edit_plan(
+        {
+            "title": "The like button",
+            "broll_cues": [{
+                "start": 10,
+                "end": 14,
+                "asset_id": "like-button",
+                "evidence": "the like button",
+            }],
+        },
+        duration=30,
+        assets=[asset],
+        transcript=[TranscriptSegment(9, 15, "The like button changed everything.")],
+    )
+    assert len(plan.broll_cues) == 1

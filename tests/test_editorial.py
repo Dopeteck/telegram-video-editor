@@ -13,7 +13,7 @@ from video_editor.editorial import (
 def test_callout_must_be_an_exact_transcript_excerpt():
     punch_ins, callouts, rejected = validate_editorial_cues(
         {
-            "punch_ins": [{"start": 4, "end": 8, "zoom": 1.12}],
+            "punch_ins": [{"start": 4, "end": 8, "zoom": 1.08}],
             "callouts": [
                 {"start": 10, "end": 13, "text": "$1.6 trillion"},
                 {"start": 15, "end": 18, "text": "$9 trillion"},
@@ -195,3 +195,22 @@ def test_filter_graph_has_speaker_punch_in_and_designed_callout_without_subtitle
     assert "$1.6 trillion" in graph
     assert "null[vout]" in graph
     assert "subtitles=captions.ass" not in graph
+
+
+
+def test_automatic_punch_ins_are_limited_to_one_subtle_zoom():
+    punch_ins, _, rejected = validate_editorial_cues(
+        {
+            "punch_ins": [
+                {"start": 2, "end": 6, "zoom": 1.08},
+                {"start": 20, "end": 24, "zoom": 1.10},
+                {"start": 40, "end": 44, "zoom": 1.14},
+            ],
+            "callouts": [],
+        },
+        duration=60,
+        transcript_text="A useful phrase appears here.",
+    )
+    assert len(punch_ins) == 1
+    assert punch_ins[0].zoom == 1.08
+    assert len(rejected) == 2

@@ -92,7 +92,7 @@ def validate_editorial_cues(
     transcript_text: str,
     *,
     transcript_segments: Sequence[Any] | None = None,
-    max_punch_ins: int = 4,
+    max_punch_ins: int = 1,
     max_callouts: int = 3,
 ) -> tuple[tuple[PunchInCue, ...], tuple[CalloutCue, ...], tuple[str, ...]]:
     """Validate the model's non-B-roll edits against the clip and transcript."""
@@ -119,11 +119,11 @@ def validate_editorial_cues(
         if start < 0 or end <= start or end > duration:
             rejected.append(f"punch-in {index + 1}: timestamps are outside the clip")
             continue
-        if not 2.0 <= end - start <= 8.0:
-            rejected.append(f"punch-in {index + 1}: duration must be 2–8 seconds")
+        if not 2.0 <= end - start <= 6.0:
+            rejected.append(f"punch-in {index + 1}: duration must be 2–6 seconds")
             continue
-        if not 1.05 <= zoom <= 1.18:
-            rejected.append(f"punch-in {index + 1}: zoom must be between 1.05 and 1.18")
+        if not 1.05 <= zoom <= 1.10:
+            rejected.append(f"punch-in {index + 1}: zoom must be between 1.05 and 1.10")
             continue
         punch_candidates.append(PunchInCue(
             start, end, zoom, str(row.get("reason") or "Emphasis punch-in")[:180]
