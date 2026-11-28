@@ -9,8 +9,9 @@ A **separate post-processing system** for finished clips produced by Chopify. It
 - Manual GitHub Actions trigger; no automatic coupling to the clipper.
 - Reads a completed clip from the existing private R2 bucket.
 - Transcribes the short clip locally with Faster-Whisper (no paid transcription API).
-- Uses local Ollama model `qwen3:4b-instruct-2507-q4_K_M` to plan edits even when the B-roll library is empty.
-- Inspects up to six sampled frames with local vision model `qwen3-vl:2b`, detects scene changes with FFmpeg, and samples face positions locally with OpenCV. Visual descriptions and face observations are passed to the editorial planner and stored in the manifest.
+- Uses local Ollama model `qwen3:4b-instruct-2507-q4_K_M` as an **adaptive Editorial Director**. It combines the transcript with visual observations to classify content (gaming, sports, tutorials, education, business, news, interviews, vlogs, travel, music, products, entertainment, documentary, or other), choose a visual mode and energy level, and plan edits even when the B-roll library is empty.
+- Inspects up to six sampled frames with local vision model `qwen3-vl:2b`, including content type and visual-format signals; detects scene changes with FFmpeg; and samples face positions locally with OpenCV. Visual descriptions and face observations are passed to the editorial planner and stored in the manifest.
+- Can render transcript-grounded **impact, statistic, quote and step graphics**. The content profile changes the colour palette, layout, hierarchy and typography sizing instead of applying one universal graphic treatment. On-screen headline and detail text must match spoken words at the proposed timestamps; unsupported or mistimed graphics are rejected.
 - Selects B-roll **only** from an asset catalogue whose entries record a source, licence, and `rights_verified: true`.
 - Uses B-roll only when its catalogue description/tags match at least two distinctive concepts in an exact, time-aligned transcript quote. Landscape footage is shown in full over a blurred background instead of being center-cropped. Automatic zooms are limited to one subtle emphasis move; a weak visual cue is rejected.
 - Detects likely burned-in subtitles with Tesseract OCR. In `auto` mode it preserves existing captions and adds new ones only when no existing text is detected; uncertain OCR fails safe and preserves the source.
@@ -25,8 +26,9 @@ If the B-roll catalogue is missing or empty, the local AI planner still chooses 
 2. Open **Actions → Edit finished clip → Run workflow** in this repository.
 3. Enter the exact R2 object key in `clip_key`.
 4. The editor transcribes, plans, renders, and writes a new result to `edited/<workflow_run_id>/`.
-5. The local vision model inspects sampled frames, while FFmpeg detects scene changes and OpenCV samples face positions. The text planner receives the transcript plus these visual observations and proposes contextual B-roll, face-aware emphasis punch-ins, and exact-phrase callouts; deterministic validation rejects unsafe timestamps, invented B-roll IDs, callout text absent from the transcript, and callouts timed over the wrong spoken phrase.
-6. The renderer checks for source subtitles before adding any new captions, applies the selected visual edits, and normalises dialogue loudness.
+5. The local vision model inspects sampled frames, while FFmpeg detects scene changes and OpenCV samples face positions. The Editorial Director combines the transcript and visual observations to choose a content profile, visual mode and energy level.
+6. The director may propose contextual B-roll, a restrained face-aware punch-in, simple exact-phrase callouts, and designed impact/stat/quote/step graphics. Deterministic validation rejects unsafe timestamps, invented B-roll IDs, unspoken graphic text, mistimed phrases and overlapping graphics.
+7. The renderer checks for source subtitles before adding any new captions, applies the selected visual treatments, and normalises dialogue loudness.
 7. If Telegram secrets are configured, the editor sends the MP4 to your Telegram chat. Files within 49 MB are sent as native Telegram videos. Larger files arrive as a private download button with a 24-hour signed R2 URL.
 8. The original clip remains unchanged.
 
@@ -67,9 +69,9 @@ The R2 workflow is manual-only. No clip-processing run is started by a push or p
 
 ## Quality roadmap
 
-1. **Current quality pass:** evidence-backed B-roll selection, full-frame B-roll composition with a blurred fill, fewer automatic punch-ins, transcript-grounded callout graphics, subtitle detection/preservation, safe caption wrapping, dialogue loudness normalisation, and local visual analysis with scene-change and face-position observations.
-2. **Next visual pass:** stronger face tracking/reframing across moving subjects, actual frame-to-B-roll visual similarity checks, scene-aware cut timing, smoother transitions, and a preview/approval step.
-3. Curated rights-cleared B-roll and optional licensed sound effects/music.
+1. **Adaptive director foundation:** cross-genre content profiling, transcript-grounded graphic moments, content-specific colour/layout systems, evidence-backed B-roll, careful punch-ins, subtitle preservation, and local visual analysis.
+2. **Next visual pass:** genuinely animated motion-design components, more reliable subject/object tracking, screen-region understanding for tutorials, scene-aware pacing and cut timing, richer sports/gameplay/action cues, and a preview/approval step.
+3. Curated rights-cleared B-roll, sound effects and music with asset-level usage records.
 4. Review UX: compare original and edited versions, approve/reject before publishing.
 5. Optional automation only after repeatable quality reviews; the clipper stays unchanged.
 
