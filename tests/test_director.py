@@ -52,7 +52,7 @@ def test_editorial_direction_accepts_grounded_content_specific_graphics():
                 "end": 6.5,
                 "kind": "impact",
                 "headline": "keeping attention",
-                "detail": "it is",
+                "detail": "",
                 "reason": "Emphasise the central argument.",
             },
             {
@@ -122,7 +122,7 @@ def test_editorial_direction_rejects_overlapping_graphics():
         {"content_type": "documentary", "visual_mode": "cinematic"},
         [
             {"start": 4.0, "end": 6.2, "kind": "quote", "headline": "keeping attention"},
-            {"start": 4.5, "end": 6.5, "kind": "impact", "headline": "it is keeping"},
+            {"start": 4.5, "end": 6.2, "kind": "impact", "headline": "it is keeping"},
         ],
         duration=20.0,
         transcript_segments=_transcript(),
