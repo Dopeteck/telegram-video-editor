@@ -693,14 +693,23 @@ def build_filter_complex(
             panel_x, panel_y, panel_w = int(width * 0.08), int(height * 0.14), int(width * 0.84)
             text_x, align = int(width * 0.11), "center"
             panel_alpha = "black@0.68"
-        panel_h = int(height * (0.205 if cue.detail else 0.155))
-        title_size = int(height * (0.066 if cue.kind == "stat" else 0.052 if cue.kind == "impact" else 0.044))
+        panel_h = int(height * (0.235 if cue.kind == "step" else 0.205 if cue.detail else 0.155))
+        title_size = int(height * (
+            0.066 if cue.kind == "stat" else
+            0.052 if cue.kind == "impact" else
+            0.046 if cue.kind == "quote" else 0.044
+        ))
         if profile.energy == "low":
             title_size = int(title_size * 0.88)
         elif profile.energy == "high":
             title_size = int(title_size * 1.08)
-        title_size = max(26, min(int(height * 0.075), title_size))
-        detail_size = max(20, min(34, int(height * 0.026)))
+        available_width = max(80, panel_w - int(width * 0.16))
+        title_size = min(title_size, int(available_width / (max(1, len(cue.headline)) * 0.58)))
+        title_size = max(22, min(int(height * 0.075), title_size))
+        detail_size = max(18, min(34, int(height * 0.026)))
+        if cue.detail:
+            detail_size = min(detail_size, int(available_width / (max(1, len(cue.detail)) * 0.56)))
+            detail_size = max(18, detail_size)
         title = _escape_drawtext(cue.headline.upper() if cue.kind in {"impact", "stat"} else cue.headline)
         detail = _escape_drawtext(cue.detail) if cue.detail else ""
         enable = f"between(t,{cue.start:.3f},{cue.end:.3f})"
@@ -715,11 +724,32 @@ def build_filter_complex(
             f"[{box_label}]drawbox=x={panel_x}:y={panel_y}:w={max(7, int(width * 0.012))}:"
             f"h={panel_h}:color={accent}@0.98:t=fill:enable='{enable}'[{accent_label}]"
         )
-        title_y = panel_y + int(height * 0.035)
+        title_y = panel_y + int(height * (0.085 if cue.kind == "step" else 0.035))
         title_x_expr = "(w-text_w)/2" if align == "center" else str(text_x)
+        if cue.kind == "quote":
+            quote_label = f"graphicquote{index}"
+            quote_size = max(34, int(height * 0.09))
+            quote_x = panel_x + int(width * 0.018)
+            quote_y = panel_y + int(height * 0.012)
+            filters.append(
+                f"[{accent_label}]drawtext=font='Liberation Sans':text='“':"
+                f"fontcolor={accent}:fontsize={quote_size}:x={quote_x}:y={quote_y}:"
+                f"enable='{enable}'[{quote_label}]"
+            )
+            accent_label = quote_label
+        elif cue.kind == "step":
+            step_label = f"graphicstep{index}"
+            step_text = _escape_drawtext(f"STEP {index:02d}")
+            filters.append(
+                f"[{accent_label}]drawtext=font='Liberation Sans':text='{step_text}':"
+                f"fontcolor={accent}:fontsize={detail_size}:x={text_x}:y={panel_y + int(height * 0.015)}:"
+                f"enable='{enable}'[{step_label}]"
+            )
+            accent_label = step_label
+        title_colour = accent if cue.kind == "stat" else "white"
         filters.append(
             f"[{accent_label}]drawtext=font='Liberation Sans':text='{title}':"
-            f"fontcolor=white:fontsize={title_size}:borderw=2:bordercolor=black@0.7:"
+            f"fontcolor={title_colour}:fontsize={title_size}:borderw=2:bordercolor=black@0.7:"
             f"x={title_x_expr}:y={title_y}:enable='{enable}'[{title_label}]"
         )
         current = title_label
