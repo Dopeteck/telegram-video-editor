@@ -8,7 +8,7 @@ A **separate post-processing system** for finished clips produced by Chopify. It
 
 - Manual GitHub Actions trigger; no automatic coupling to the clipper.
 - Reads a completed clip from the existing private R2 bucket.
-- Transcribes the short clip locally with Faster-Whisper (no paid transcription API).
+- Transcribes speech locally with Faster-Whisper (no paid transcription API). Speech is optional: clips with no dialogue, including music, gameplay and silent demonstrations, continue through a visual-only planning path and do not receive invented captions or spoken-word graphics.
 - Uses local Ollama model `qwen3:4b-instruct-2507-q4_K_M` as an **adaptive Editorial Director**. It combines the transcript with visual observations to classify content (gaming, sports, tutorials, education, business, news, interviews, vlogs, travel, music, products, entertainment, documentary, or other), choose a visual mode and energy level, and plan edits even when the B-roll library is empty.
 - Inspects up to six sampled frames with local vision model `qwen3-vl:2b`, including content type and visual-format signals; detects scene changes with FFmpeg; and samples face positions locally with OpenCV. Visual descriptions and face observations are passed to the editorial planner and stored in the manifest.
 - Can render transcript-grounded **impact, statistic, quote and step graphics**. The content profile changes the colour palette, layout, hierarchy and typography sizing instead of applying one universal graphic treatment. On-screen headline and detail text must match spoken words at the proposed timestamps; unsupported or mistimed graphics are rejected.
