@@ -241,3 +241,79 @@ def test_broll_evidence_keeps_specific_topic_words_that_look_like_stopwords():
         transcript=[TranscriptSegment(9, 15, "The like button changed everything.")],
     )
     assert len(plan.broll_cues) == 1
+
+
+def test_speechless_clip_can_receive_visual_only_edit_plan(monkeypatch):
+    import json
+    import video_editor.engine as engine
+
+    payload = {
+        "title": "A decisive final move",
+        "editorial_profile": {
+            "content_type": "gaming",
+            "visual_mode": "impact",
+            "energy": "high",
+            "rationale": "Fast action footage with no speech.",
+        },
+        "broll_cues": [],
+        "punch_ins": [
+            {"start": 10.0, "end": 14.0, "zoom": 1.08, "reason": "Emphasise the key action."}
+        ],
+        "callouts": [],
+        "graphic_cues": [],
+    }
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps({"message": {"content": json.dumps(payload)}}).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        prompt = json.loads(request.data.decode("utf-8"))["messages"][1]["content"]
+        user_data = json.loads(prompt)
+        assert user_data["speech_available"] is False
+        assert user_data["transcript"] == ""
+        assert "no usable speech" in user_data["instruction"]
+        assert user_data["visual_analysis"]["sampled_frames"]
+        return FakeResponse()
+
+    monkeypatch.setattr(engine.urllib.request, "urlopen", fake_urlopen)
+    visual_context = {
+        "sampled_frames": [
+            {"timestamp": 12.0, "description": "A player in a fast-paced game scene."}
+        ],
+        "scene_changes_seconds": [8.0, 12.0],
+    }
+    plan = engine.create_edit_plan(
+        [], 30.0, [], visual_context=visual_context
+    )
+    assert plan.editorial_profile.content_type == "gaming"
+    assert len(plan.punch_ins) == 1
+    assert plan.graphic_cues == ()
+    assert plan.callouts == ()
+
+
+def test_transcription_returns_empty_result_for_speechless_video(monkeypatch, tmp_path):
+    import sys
+    from types import ModuleType, SimpleNamespace
+
+    import video_editor.engine as engine
+
+    class FakeWhisperModel:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, *args, **kwargs):
+            return iter(()), SimpleNamespace(language=None)
+
+    fake_whisper = ModuleType("faster_whisper")
+    fake_whisper.WhisperModel = FakeWhisperModel
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_whisper)
+    transcript, language = engine.transcribe_video(tmp_path / "music-only.mp4")
+    assert transcript == []
+    assert language is None

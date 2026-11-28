@@ -23,15 +23,25 @@ from .editorial import (
     validate_editorial_cues,
 )
 from .visual import analyze_video, apply_face_focus
+from .director import EditorialProfile, GraphicCue, validate_editorial_direction
 
 SUPPORTED_VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm"}
-SYSTEM_PROMPT = """You are a senior short-form documentary editor, not a caption generator.
+SYSTEM_PROMPT = """You are a senior cross-genre short-form video editor, not a caption generator.
 Create a restrained but noticeable editorial plan for the supplied finished clip.
 Make useful decisions even when the B-roll catalogue is empty.
 Use the transcript timestamps and inspected video frames to choose the strongest moments; never invent facts. Treat visual descriptions as observations, not assumptions.
 Return JSON only:
 {
   "title": "short editorial title",
+  "editorial_profile": {
+    "content_type": "gaming|sports|tutorial|education|business|news|interview|vlog|travel|music|product|entertainment|documentary|other",
+    "visual_mode": "impact|instructional|editorial|cinematic|minimal",
+    "energy": "low|medium|high",
+    "rationale": "brief reason for this creative direction"
+  },
+  "graphic_cues": [
+    {"start": 12.0, "end": 15.0, "kind": "impact|stat|quote|step", "headline": "exact spoken phrase", "detail": "optional exact spoken phrase", "reason": "what this graphic helps viewers understand"}
+  ],
   "broll_cues": [
     {"start": 12.0, "end": 17.0, "asset_id": "exact-catalogue-id", "evidence": "exact spoken words at this time", "reason": "why this shot supports those words"}
   ],
@@ -45,8 +55,10 @@ Return JSON only:
 Rules:
 - B-roll: use only supplied catalogue IDs; never invent an asset. At most 2 cues, 2–8 seconds each, non-overlapping. Each cue MUST include an exact, contiguous transcript quote in "evidence". The quote must be spoken during that cue. Only select an asset when at least two distinctive words/concepts in the evidence also appear in its description or tags (or one highly distinctive 8+ character term). If the available footage does not clearly match, return no B-roll cue. Never use a merely mood-adjacent or generic shot.
 - Punch-ins: at most ONE subtle emphasis punch-in in the entire clip, 2–6 seconds, zoom 1.05–1.10. Prefer no punch-in over a decorative zoom. Do not use zooms to fill gaps or simulate camera movement.
-- Callouts: choose at most 3 high-value facts, numbers, or concepts. Text must be an exact contiguous phrase from the transcript, at most 34 characters, one line, 1.5–5 seconds, and non-overlapping. Do not paraphrase, add claims, or repeat ordinary dialogue.
-- A callout is a designed graphic emphasis, not a subtitle. Place it in the upper safe area; the renderer handles placement.
+- Editorial profile: classify the actual clip using BOTH the transcript and inspected frames. Choose one supported content_type, one visual_mode and an energy level. Do not call every clip a podcast; use "other" when uncertain. The profile changes the graphic design language.
+- Graphic cues: choose at most 3 moments that genuinely benefit from a designed motion-graphic treatment. Each is 1.6–4.5 seconds, non-overlapping, and has a kind of impact, stat, quote, or step. The headline MUST be an exact contiguous phrase spoken during that exact time window. Optional detail must also be an exact spoken phrase at that time. A stat headline must contain a number or symbol that was actually spoken. Never invent statistics, labels presented as facts, or explanations. Use no graphic when the footage already communicates clearly.
+- Callouts: legacy simple emphasis only; choose at most 2, exact transcript phrases, 1.5–5 seconds. Do not duplicate a graphic cue or place one over a graphic cue.
+- Graphic cards are not subtitles. Keep the important subject visible and avoid covering source captions.
 - Do not propose subtitles. Existing burned-in subtitles are preserved; new captions are added only after a separate detection check.
 - If an edit does not improve clarity or emphasis, leave its cue list empty.
 - Keep all cue times inside the clip and do not overlap cues of the same type."""
@@ -94,13 +106,17 @@ class EditPlan:
     punch_ins: tuple[PunchInCue, ...] = ()
     callouts: tuple[CalloutCue, ...] = ()
     rejected_cues: tuple[str, ...] = ()
+    editorial_profile: EditorialProfile = EditorialProfile()
+    graphic_cues: tuple[GraphicCue, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "title": self.title,
+            "editorial_profile": self.editorial_profile.to_dict(),
             "broll_cues": [asdict(cue) for cue in self.broll_cues],
             "punch_ins": [asdict(cue) for cue in self.punch_ins],
             "callouts": [asdict(cue) for cue in self.callouts],
+            "graphic_cues": [cue.to_dict() for cue in self.graphic_cues],
             "rejected_cues": list(self.rejected_cues),
         }
 
@@ -263,10 +279,29 @@ def validate_edit_plan(
 
     transcript_text = " ".join(segment.text for segment in (transcript or []))
     punch_ins, callouts, editorial_rejections = validate_editorial_cues(
-        payload, duration, transcript_text, transcript_segments=transcript
+        payload, duration, transcript_text, transcript_segments=transcript,
+        max_callouts=2,
     )
     rejected.extend(editorial_rejections)
-    return EditPlan(title, tuple(non_overlapping), punch_ins, callouts, tuple(rejected))
+    editorial_profile, graphic_cues, direction_rejections = validate_editorial_direction(
+        payload.get("editorial_profile"),
+        payload.get("graphic_cues", []),
+        duration,
+        transcript or [],
+    )
+    rejected.extend(direction_rejections)
+    if graphic_cues:
+        filtered_callouts = []
+        for cue in callouts:
+            if any(cue.start < graphic.end and cue.end > graphic.start for graphic in graphic_cues):
+                rejected.append(f"callout at {cue.start:.2f}s: overlaps an adaptive graphic")
+            else:
+                filtered_callouts.append(cue)
+        callouts = tuple(filtered_callouts)
+    return EditPlan(
+        title, tuple(non_overlapping), punch_ins, callouts, tuple(rejected),
+        editorial_profile, graphic_cues,
+    )
 
 
 def load_broll_catalog(client, bucket: str, catalog_key: str) -> list[BrollAsset]:
@@ -315,8 +350,8 @@ def transcribe_video(video_path: Path, model_size: str = "small") -> tuple[list[
             if end > start:
                 words.append(TranscriptWord(start, end, word_text))
         transcript.append(TranscriptSegment(segment_start, segment_end, text, tuple(words)))
-    if not transcript:
-        raise RuntimeError("Whisper found no usable speech in the finished clip.")
+    # A clip without dialogue is still valid editing input: gameplay, sports,
+    # music, scenic footage and silent tutorials can be directed visually.
     return transcript, getattr(info, "language", None)
 
 
@@ -335,8 +370,8 @@ def create_edit_plan(
     timeout_seconds: int = 300,
     visual_context: dict[str, Any] | None = None,
 ) -> EditPlan:
-    if not transcript:
-        raise ValueError("Cannot plan an edit without transcript segments.")
+    if not transcript and visual_context is None:
+        raise ValueError("A visual analysis is required when no transcript is available.")
     transcript_text = "\n".join(
         f"[{_timestamp(row.start)} - {_timestamp(row.end)}] {row.text}" for row in transcript
     )
@@ -349,6 +384,7 @@ def create_edit_plan(
         "transcript": transcript_text[:14000],
         "available_rights_cleared_broll": catalogue,
         "visual_analysis": visual_context or {},
+        "speech_available": bool(transcript),
         "instruction": (
             "Return editorial decisions for this clip. Only propose B-roll when the asset's "
             "description/tags clearly match the quoted words in that exact time window. "
@@ -356,6 +392,13 @@ def create_edit_plan(
             "facts or visuals. Use visual frame descriptions and scene changes to understand "
             "what is already on screen and avoid redundant or contradictory inserts. "
             "Prefer zero B-roll and zero zooms over a weak or decorative edit."
+            + (
+                " This clip has no usable speech: do not create captions, callouts, quotes, "
+                "statistics or transcript-grounded B-roll. Base the content profile and any "
+                "visual-only emphasis on the sampled frames and scene changes. Do not invent "
+                "dialogue or on-screen text."
+                if not transcript else ""
+            )
         ),
     }
     body = {
@@ -401,12 +444,20 @@ def probe_video(path: Path) -> dict[str, Any]:
     }
 
 
-def resolve_caption_policy(mode: str, video_path: Path, duration: float) -> tuple[bool, str]:
-    """Decide whether to add captions, failing safe when existing text is uncertain."""
+def resolve_caption_policy(
+    mode: str,
+    video_path: Path,
+    duration: float,
+    *,
+    has_transcript: bool = True,
+) -> tuple[bool, str]:
+    """Decide whether to add captions, failing safe when source text is uncertain."""
     if mode not in {"auto", "preserve", "force"}:
         raise ValueError("caption_mode must be one of: auto, preserve, force.")
     if mode == "preserve":
         return False, "preserve_source_captions"
+    if not has_transcript:
+        return False, "no_speech_detected_no_new_captions"
     if mode == "force":
         return True, "forced_new_captions"
     detected = detect_burned_in_captions(video_path, duration)
@@ -547,6 +598,8 @@ def build_filter_complex(
     callouts: list[CalloutCue] | None = None,
     *,
     include_captions: bool = True,
+    graphic_cues: list[GraphicCue] | None = None,
+    editorial_profile: EditorialProfile | None = None,
 ) -> str:
     filters = ["[0:v]format=yuv420p[base0]"]
     current = "base0"
@@ -623,6 +676,111 @@ def build_filter_complex(
         )
         current = output_label
 
+    # Adaptive graphic treatments are selected from the clip's editorial
+    # profile and the planner's transcript-grounded moments.
+    profile = editorial_profile or EditorialProfile()
+    theme_by_content = {
+        "gaming": "0xFFD84A", "sports": "0xFFD84A",
+        "tutorial": "0x58D7F5", "education": "0x58D7F5",
+        "business": "0xE9B767", "news": "0xE9B767",
+        "documentary": "0xE9B767", "travel": "0xF29A72",
+        "vlog": "0xF29A72", "music": "0xF29A72",
+        "entertainment": "0xF29A72", "product": "0xA9D6A2",
+    }
+    accent = theme_by_content.get(profile.content_type, "0xF1F1F1")
+    mode = profile.visual_mode
+    for index, cue in enumerate(graphic_cues or [], start=1):
+        if mode == "instructional":
+            panel_x, panel_y, panel_w = int(width * 0.055), int(height * 0.115), int(width * 0.89)
+            text_x, align = int(width * 0.105), "left"
+            panel_alpha = "black@0.84"
+        elif mode == "editorial":
+            panel_x, panel_y, panel_w = int(width * 0.075), int(height * 0.16), int(width * 0.85)
+            text_x, align = int(width * 0.12), "left"
+            panel_alpha = "black@0.78"
+        elif mode == "cinematic":
+            panel_x, panel_y, panel_w = int(width * 0.08), int(height * 0.19), int(width * 0.84)
+            text_x, align = int(width * 0.11), "left"
+            panel_alpha = "black@0.58"
+        elif mode == "impact":
+            panel_x, panel_y, panel_w = int(width * 0.045), int(height * 0.18), int(width * 0.91)
+            text_x, align = int(width * 0.08), "center"
+            panel_alpha = "black@0.86"
+        else:
+            panel_x, panel_y, panel_w = int(width * 0.08), int(height * 0.14), int(width * 0.84)
+            text_x, align = int(width * 0.11), "center"
+            panel_alpha = "black@0.68"
+        panel_h = int(height * (0.235 if cue.kind == "step" else 0.205 if cue.detail else 0.155))
+        title_size = int(height * (
+            0.066 if cue.kind == "stat" else
+            0.052 if cue.kind == "impact" else
+            0.046 if cue.kind == "quote" else 0.044
+        ))
+        if profile.energy == "low":
+            title_size = int(title_size * 0.88)
+        elif profile.energy == "high":
+            title_size = int(title_size * 1.08)
+        available_width = max(80, panel_w - int(width * 0.16))
+        title_size = min(title_size, int(available_width / (max(1, len(cue.headline)) * 0.58)))
+        title_size = max(12, min(int(height * 0.075), title_size))
+        detail_size = max(12, min(34, int(height * 0.026)))
+        if cue.detail:
+            detail_size = min(detail_size, int(available_width / (max(1, len(cue.detail)) * 0.56)))
+            detail_size = max(12, detail_size)
+        title = _escape_drawtext(cue.headline.upper() if cue.kind in {"impact", "stat"} else cue.headline)
+        detail = _escape_drawtext(cue.detail) if cue.detail else ""
+        enable = f"between(t,{cue.start:.3f},{cue.end:.3f})"
+        alpha_expr = f"max(0\\,min(1\\,(t-{cue.start:.3f})/0.18))"
+        box_label = f"graphicbox{index}"
+        accent_label = f"graphicbar{index}"
+        title_label = f"graphictitle{index}"
+        filters.append(
+            f"[{current}]drawbox=x={panel_x}:y={panel_y}:w={panel_w}:h={panel_h}:"
+            f"color={panel_alpha}:t=fill:enable='{enable}'[{box_label}]"
+        )
+        filters.append(
+            f"[{box_label}]drawbox=x={panel_x}:y={panel_y}:w={max(7, int(width * 0.012))}:"
+            f"h={panel_h}:color={accent}@0.98:t=fill:enable='{enable}'[{accent_label}]"
+        )
+        title_y = panel_y + int(height * (0.085 if cue.kind == "step" else 0.035))
+        title_x_expr = "(w-text_w)/2" if align == "center" else str(text_x)
+        if cue.kind == "quote":
+            quote_label = f"graphicquote{index}"
+            quote_size = max(34, int(height * 0.09))
+            quote_x = panel_x + int(width * 0.018)
+            quote_y = panel_y + int(height * 0.012)
+            filters.append(
+                f"[{accent_label}]drawtext=font='Liberation Sans':text='“':"
+                f"fontcolor={accent}:fontsize={quote_size}:x={quote_x}:y={quote_y}:"
+                f"enable='{enable}'[{quote_label}]"
+            )
+            accent_label = quote_label
+        elif cue.kind == "step":
+            step_label = f"graphicstep{index}"
+            step_text = _escape_drawtext(f"STEP {index:02d}")
+            filters.append(
+                f"[{accent_label}]drawtext=font='Liberation Sans':text='{step_text}':"
+                f"fontcolor={accent}:fontsize={detail_size}:x={text_x}:y={panel_y + int(height * 0.015)}:"
+                f"enable='{enable}'[{step_label}]"
+            )
+            accent_label = step_label
+        title_colour = accent if cue.kind == "stat" else "white"
+        filters.append(
+            f"[{accent_label}]drawtext=font='Liberation Sans':text='{title}':"
+            f"fontcolor={title_colour}:alpha='{alpha_expr}':fontsize={title_size}:borderw=2:bordercolor=black@0.7:"
+            f"x={title_x_expr}:y={title_y}:enable='{enable}'[{title_label}]"
+        )
+        current = title_label
+        if detail:
+            detail_label = f"graphicdetail{index}"
+            detail_y = panel_y + int(height * (0.16 if cue.kind == "step" else 0.112))
+            filters.append(
+                f"[{current}]drawtext=font='Liberation Sans':text='{detail}':"
+                f"fontcolor={accent}:alpha='{alpha_expr}':fontsize={detail_size}:borderw=1:bordercolor=black@0.65:"
+                f"x={title_x_expr}:y={detail_y}:enable='{enable}'[{detail_label}]"
+            )
+            current = detail_label
+
     if include_captions:
         filters.append(f"[{current}]subtitles=captions.ass[vout]")
     else:
@@ -639,6 +797,8 @@ def render_video(
     punch_ins: list[PunchInCue] | None = None,
     callouts: list[CalloutCue] | None = None,
     add_captions: bool = False,
+    graphic_cues: list[GraphicCue] | None = None,
+    editorial_profile: EditorialProfile | None = None,
 ) -> Path:
     details = probe_video(input_path)
     if details["duration"] <= 0:
@@ -661,6 +821,7 @@ def render_video(
         "-filter_complex", build_filter_complex(
             selected_cues, details["width"], details["height"],
             punch_ins=punch_ins, callouts=callouts, include_captions=add_captions,
+            graphic_cues=graphic_cues, editorial_profile=editorial_profile,
         ),
         "-map", "[vout]", "-map", "0:a?", "-t", f"{details['duration']:.3f}",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "19",
@@ -739,7 +900,10 @@ def process_r2_clip(
             raise RuntimeError(f"R2 download was empty: {clip_key}")
 
         details = probe_video(clip_path)
-        transcript, language = transcribe_video(clip_path, whisper_model)
+        if details["has_audio"]:
+            transcript, language = transcribe_video(clip_path, whisper_model)
+        else:
+            transcript, language = [], None
         assets = load_broll_catalog(client, bucket, catalog_key)
         visual_analysis = analyze_video(
             clip_path, details["duration"], model=vision_model, ollama_url=ollama_url
@@ -752,6 +916,7 @@ def process_r2_clip(
             plan.title, plan.broll_cues,
             apply_face_focus(plan.punch_ins, visual_analysis.faces),
             plan.callouts, plan.rejected_cues,
+            plan.editorial_profile, plan.graphic_cues,
         )
 
         broll_paths: dict[str, Path] = {}
@@ -765,7 +930,8 @@ def process_r2_clip(
             broll_paths[asset.asset_id] = path
 
         add_captions, caption_decision = resolve_caption_policy(
-            caption_mode, clip_path, details["duration"]
+            caption_mode, clip_path, details["duration"],
+            has_transcript=bool(transcript),
         )
         output_name = f"{clip_path.stem}.edited.mp4"
         output_path = workdir / "output" / output_name
@@ -773,7 +939,8 @@ def process_r2_clip(
         render_video(
             clip_path, broll_paths, list(plan.broll_cues), transcript, output_path,
             punch_ins=list(plan.punch_ins), callouts=list(plan.callouts),
-            add_captions=add_captions,
+            add_captions=add_captions, graphic_cues=list(plan.graphic_cues),
+            editorial_profile=plan.editorial_profile,
         )
         output_key = f"edited/{job_id}/{output_name}"
         if output_key == clip_key:
@@ -785,6 +952,8 @@ def process_r2_clip(
             "model": model, "vision_model": vision_model,
             "visual_analysis": visual_analysis.to_dict(),
             "whisper_model": whisper_model, "title": plan.title,
+            "editorial_profile": plan.editorial_profile.to_dict(),
+            "graphic_cues": [cue.to_dict() for cue in plan.graphic_cues],
             "caption_mode": caption_mode, "caption_decision": caption_decision,
             "broll_cues": [asdict(cue) for cue in plan.broll_cues],
             "punch_ins": [asdict(cue) for cue in plan.punch_ins],
@@ -808,6 +977,9 @@ def process_r2_clip(
             "source_key": clip_key, "output_key": output_key, "manifest_key": manifest_key,
             "title": plan.title, "broll_count": len(plan.broll_cues),
             "punch_in_count": len(plan.punch_ins), "callout_count": len(plan.callouts),
+            "graphic_count": len(plan.graphic_cues),
+            "content_type": plan.editorial_profile.content_type,
+            "visual_mode": plan.editorial_profile.visual_mode,
             "caption_decision": caption_decision,
             "visual_status": visual_analysis.vision_status,
             "visual_frames_count": len(visual_analysis.frames),
