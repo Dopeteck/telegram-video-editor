@@ -33,6 +33,8 @@ class FrameInsight:
     timestamp: float
     description: str
     shot_type: str = "unknown"
+    content_type: str = "other"
+    visual_format: str = "unknown"
     visible_subjects: tuple[str, ...] = ()
     composition: str = "unknown"
     visual_interest: str = ""
@@ -71,6 +73,8 @@ class VisualAnalysis:
                     "timestamp": round(frame.timestamp, 2),
                     "description": frame.description,
                     "shot_type": frame.shot_type,
+                    "content_type": frame.content_type,
+                    "visual_format": frame.visual_format,
                     "visible_subjects": list(frame.visible_subjects),
                     "composition": frame.composition,
                     "visual_interest": frame.visual_interest,
@@ -178,6 +182,8 @@ def parse_vision_response(content: str, timestamps: Sequence[float]) -> tuple[Fr
             timestamp=float(timestamp),
             description=str(row.get("description") or "No clear visual description returned")[:500],
             shot_type=str(row.get("shot_type") or "unknown")[:40],
+            content_type=str(row.get("content_type") or "other").lower()[:32],
+            visual_format=str(row.get("visual_format") or "unknown").lower()[:40],
             visible_subjects=tuple(str(item)[:80] for item in subjects[:8]),
             composition=str(row.get("composition") or "unknown")[:80],
             visual_interest=str(row.get("visual_interest") or "")[:240],
@@ -276,13 +282,18 @@ def describe_frames_with_ollama(
         for index, timestamp in enumerate(timestamps)
     )
     prompt = (
-        "You are inspecting sampled frames from a short-form documentary video. "
+        "You are inspecting sampled frames from a short-form video that may belong to any genre. "
         "Describe only visible evidence. Do not infer identities, speech, events outside the frame, "
         "or details you cannot see. For every image return a concise description, shot_type "
         "(talking_head, interview, screen_recording, object_closeup, broll, wide_scene, other), "
-        "visible_subjects, composition (left, centre, right, wide, close, or mixed), and one "
-        "useful visual-interest note. Return JSON only with this shape: "
-        '{"frames":[{"description":"...","shot_type":"talking_head","visible_subjects":["person"],'
+        "content_type (gaming, sports, tutorial, education, business, news, interview, vlog, travel, "
+        "music, product, entertainment, documentary, other), visual_format "
+        "(gameplay, sports_action, screen_recording, demonstration, montage, scenic, product_shot, "
+        "stage_performance, talking_head, interview, animation, mixed, unknown), visible_subjects, "
+        "composition (left, centre, right, wide, close, or mixed), and one useful visual-interest note. "
+        "Classify only what the image supports; use other/unknown when uncertain. Return JSON only with this shape: "
+        '{"frames":[{"description":"...","shot_type":"talking_head","content_type":"interview",'
+        '"visual_format":"talking_head","visible_subjects":["person"],'
         '"composition":"centre","visual_interest":"..."}]}. '
         "Keep the frame array in exactly the supplied image order.\n" + mapping
     )
