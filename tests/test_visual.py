@@ -33,6 +33,8 @@ def test_parse_vision_response_maps_ordered_images_to_timestamps():
             {
                 "description": "A presenter speaks to camera.",
                 "shot_type": "talking_head",
+                "content_type": "interview",
+                "visual_format": "talking_head",
                 "visible_subjects": ["one person"],
                 "composition": "centre",
                 "visual_interest": "The face is clearly visible.",
@@ -48,6 +50,10 @@ def test_parse_vision_response_maps_ordered_images_to_timestamps():
     frames = parse_vision_response(content, [2.5, 7.0])
     assert frames[0].timestamp == 2.5
     assert frames[0].shot_type == "talking_head"
+    assert frames[0].content_type == "interview"
+    assert frames[0].visual_format == "talking_head"
+    assert frames[1].content_type == "other"
+    assert frames[1].visual_format == "unknown"
     assert frames[1].description == "A close view of a phone screen."
     assert frames[1].visual_interest == ""
 
